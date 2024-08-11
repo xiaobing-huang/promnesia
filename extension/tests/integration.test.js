@@ -4,35 +4,12 @@
  * but it segfaults every other time
  * https://github.com/nodejs/node/issues/35889
  */
-
-import {setOptions, getOptions} from '../src/options'
-
-global.chrome = {
-    storage: {
-        sync: {
-            // meh.
-            get: (name, res) => {
-                res({'options': {
-                    host: 'http://badhost:43210', // some random port, to cause it fail
-                }})
-            }
-        },
-    },
-    runtime: {
-        lastError: null,
-        getManifest    : () => { return {version: 'whatever'} },
-    },
-}
-
-global.browser = {
-    runtime: {
-        lastError: null,
-        getPlatformInfo: async () => {},
-    },
-}
+import mockBrowser from "../__mocks__/browser"
+global.chrome = mockBrowser
 
 
 test('options', async () => {
+    const {setOptions, getOptions} = await import ('../src/options')
     // shouldn't crash at least..
     const opts = await getOptions()
 })
@@ -42,8 +19,9 @@ import fetch from 'node-fetch'
 global.fetch = fetch
 
 
-import {backend, makeFakeVisits} from '../src/api'
 test('visits', async() => {
+    const {backend, makeFakeVisits} = await import ('../src/api')
+
     // const opts = await getOptions()
     // opts.host = host: 'http//bad.host',
    
@@ -55,24 +33,19 @@ test('visits', async() => {
 })
 
 
-import {allsources} from '../src/sources'
-
-
 // meh.
-global.browser.history = {
-    getVisits: async (obj) => [],
-    search   : async (obj) => [],
-}
-global.browser.bookmarks = {
-    getTree: async () => [{
-        children: [{
-            url: 'http://whatever.com/',
-            dateAdded: 16 * 10 ** 8 * 1000,
-        }],
+mockBrowser.history.getVisits.mockImplementation(async (obj) => [])
+mockBrowser.history.search   .mockImplementation(async (obj) => [])
+mockBrowser.bookmarks.getTree.mockImplementation(async () => [{
+    children: [{
+        url: 'http:whatever.com/',
+        dateAdded: 16 * 10 ** 8 * 1000,
     }],
-}
+}])
 
 test('visits_allsources', async() => {
+    const {allsources} = await import('../src/sources')
+
     const vis = await allsources.visits('https://whatever.com/')
     expect(vis.visits).toHaveLength(2)
     expect(vis.normalised_url).toStrictEqual('whatever.com')
@@ -80,18 +53,22 @@ test('visits_allsources', async() => {
 
 
 test('search_works', async () => {
+    const {allsources} = await import('../src/sources')
+
     // at least shouldn't crash
     const res = await allsources.search('https://123.coom')
     const [e] = res.visits
     expect(e.message).toMatch(/request .* failed/)
 })
 
-import {MultiSource, bookmarks, thisbrowser} from '../src/sources'
-
 test('search_defensive', async() => {
+    const {backend} = await import ('../src/api')
+    const {MultiSource, bookmarks, thisbrowser} = await import ('../src/sources')
+
+
     // precondition: some error in processing history api, e.g. it's unavailable or something
-    global.browser.history.search    = async (q) => null
-    global.browser.bookmarks.getTree = async () => null
+    mockBrowser.history.search.mockImplementation(async (q) => null)
+    mockBrowser.bookmarks.getTree.mockImplementation(async () => null)
 
     // TODO wtf?? for some reason default order (backend, browser, bookmarks) causes
     // 'Promise rejection was handled asynchronously'
@@ -117,6 +94,8 @@ import fetchMock from 'jest-fetch-mock'
 // })
 
 test('visits_badresponse', async() => {
+    const {backend} = await import ('../src/api')
+
     fetchMock.enableMocks()
     fetchMock.mockResponse('bad!')
     const res = await backend.visits('http://mock.com')
@@ -124,9 +103,10 @@ test('visits_badresponse', async() => {
 })
 
 
-import {fake} from '../src/api'
-
 test('visited', async() => {
+    const {backend} = await import ('../src/api')
+    const {fake} = await import ('../src/api')
+
     fetchMock.enableMocks()
     const [v] = fake.apiVisits(1)
     {

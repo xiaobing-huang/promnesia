@@ -1,12 +1,11 @@
-/* @flow */
-
 /*
  * Communication with backend
  */
 
+import browser from "webextension-polyfill"
 
 import type {Locator, Src, Url, Second, JsonObject, AwareDate, NaiveDate} from './common'
-import {unwrap, Visit, Visits} from './common'
+import {Visit, Visits} from './common'
 import {getOptions} from './options'
 import {normalise_url} from './normalise'
 
@@ -18,16 +17,18 @@ type VisitsResponse = {
 }
 
 // NOTE: boolean is legacy behaviour
-type VisitedBackendResponse = Array<?JsonObject | boolean>
+type VisitedBackendResponse = Array<JsonObject | null | boolean>
+
+type Endpoint = 'visits' | 'search' | 'search_around' | 'visited'
+
 
 // TODO ugh, why params: {} not working??
-export async function queryBackendCommon<R>(params: any, endp: string): Promise<R | Error> {
+export async function queryBackendCommon<R>(params: any, endp: Endpoint): Promise<R | Error> {
     const opts = await getOptions()
     if (opts.host == '') { // use 'dummy' backend
         // the user only wants to use browser visits?
         // todo: won't work for all endpoints, but can think how to fix later..
         if (endp == 'visits' || endp == 'search' || endp == 'search_around') {
-            // $FlowFixMe
             let url = params['url']
             if (url == null) { // meh need to be stricter here..
                 url = 'http://DUMMYURL.org'
@@ -37,51 +38,45 @@ export async function queryBackendCommon<R>(params: any, endp: string): Promise<
                 original_url: url,
                 normalised_url: normalise_url(url),
             }
-            return ((res: any): R)
+            return res as R
         } else if (endp == 'visited') {
-            // $FlowFixMe
-            let urls: Array<Url> = params['urls']
+            const urls: Array<Url> = params['urls']
             const res: VisitedBackendResponse = new Array(urls.length)
             res.fill(null)
-            return ((res: any): R)
+            return res as R
         } else {
             throw new Error(`'${endp}' isn't implemented without the backend yet. Please set host in the extension settings.`)
         }
     }
 
     const endpoint = `${opts.host}/${endp}`
-    params['client_version'] = chrome.runtime.getManifest().version
+    params['client_version'] = browser.runtime.getManifest().version
 
-    function with_stack(e: Error): Error {
-        const stack = []
-        if (e.stack) {
-            stack.push(e.stack)
-        }
-        stack.push(`while requesting ${endpoint}`)
-        stack.push("check extension options, make sure you set backend or disable it (set to empty string)")
-        e.stack = stack.join('\n')
-        console.error(e, e.stack) // hopefully worth loging, meant to happen rarely
-        return e
+    const extra_error = "Check if backend is running, or disable it in extension preferences."
+
+    let response: Response
+    try {
+        response = await fetch(
+            endpoint,
+            {
+                method: 'POST', // todo use GET?
+                headers: {
+                    'Content-Type' : 'application/json',
+                    'Authorization': "Basic " + btoa(opts.token),
+                },
+                body: JSON.stringify(params)
+            },
+        )
+    } catch (err) {
+        console.error(err)
+        throw new Error(`${endpoint}: unavailable (${(err as Error).toString()}).\n${extra_error}`)
     }
 
-    // TODO cors mode?
-    return fetch(endpoint, {
-        method: 'POST', // todo use GET?
-        headers: {
-            'Content-Type' : 'application/json',
-            'Authorization': "Basic " + btoa(opts.token),
-        },
-        body: JSON.stringify(params)
-    }).then(response => {
-        // right, fetch API doesn't reject on HTTP error status...
-        const ok = response.ok
-        if (!ok) {
-            return with_stack(new Error(`${response.statusText} (${response.status}`))
-        }
-        return response.json()
-    }).catch((err: Error) => {
-        return with_stack(err)
-    })
+    // note: fetch API doesn't reject on HTTP error
+    if (!response.ok) {  // http error
+        throw new Error(`${endpoint}: HTTP error ${response.status} ${response.statusText}.\n${extra_error}`)
+    }
+    return response.json()
 }
 
 // eslint-disable-next-line no-unused-vars
@@ -89,7 +84,7 @@ export function makeFakeVisits(count: number): Visits {
     return new Visits(
         'github.com',
         'github.com',
-        fake.apiVisits(count).map(v => unwrap(rawToVisit(v))),
+        fake.apiVisits(count).map(v => rawToVisit(v)!),
     )
 }
 
@@ -111,23 +106,23 @@ export const backend = {
                .then(rawToVisits)
                .catch((err: Error) => err)
     },
-    visited: async function(urls: Array<Url>): Promise<Array<?Visit> | Error> {
+    visited: async function(urls: Array<Url>): Promise<Array<Visit | null> | Error> {
         return await queryBackendCommon<VisitedBackendResponse>({urls: urls}, 'visited')
             .then(r => {
                 if (r instanceof Error) {
                     return r
                 }
-                const res: Array<?Visit> = new Array(r.length)
+                const res: Array<Visit | null> = new Array(r.length)
                 res.fill(null)
                 const now = new Date() // TODO hmm, need to think of smth better?
                 for (let i = 0; i < r.length; i++) {
-                    let x: ?JsonObject | boolean = r[i]
+                    const x: JsonObject | null | boolean = r[i]
                     if (x == null) {
                         res[i] = null
                         continue
                     }
-                    let url = urls[i]
-                    let v: ?Visit
+                    const url = urls[i]
+                    let v: Visit | null
                     if (typeof x === "boolean") {
                         // legavy behaviour
                         if (x === false) {
@@ -136,8 +131,8 @@ export const backend = {
                             v = new Visit(
                                 url,
                                 normalise_url(url),
-                                ((now: any): AwareDate),
-                                ((now: any): NaiveDate),
+                                now as  AwareDate,
+                                now as  NaiveDate,
                                 ['backend'], // TODO suggest to update the backend?
                             )
                         }
@@ -160,7 +155,7 @@ function rawToVisits(vis: VisitsResponse | Error): Visits | Error {
     }
     // TODO filter errors? not sure.
     // TODO this could be more defensive too
-    const visits: Array<Visit | Error> = vis['visits'].map(x => unwrap(rawToVisit(x)))
+    const visits: Array<Visit | Error> = vis['visits'].map(x => rawToVisit(x)!)
     return new Visits(
         vis['original_url'],
         vis['normalised_url'],
@@ -168,7 +163,7 @@ function rawToVisits(vis: VisitsResponse | Error): Visits | Error {
     )
 }
 
-function rawToVisit(v: ?JsonObject): ?Visit {
+function rawToVisit(v: JsonObject | null): Visit | null {
     if (v == null) {
         return null
     }
@@ -176,20 +171,20 @@ function rawToVisit(v: ?JsonObject): ?Visit {
     // NOTE: server returns a string with TZ offset
     // Date class in js always keeps UTC inside
     // so we just use two separate values and treat them differently
-    const dt_utc   = ((new Date(dts)                           : any): AwareDate)
+    const dt_utc   = new Date(dts) as AwareDate
     let dtl = new Date(dts.slice(0, -' +0000'.length))
     // ugh. parsing doesn't even throw?
     if (isNaN(dtl.getTime())) {
         console.error('error parsing %s', dts)
         dtl = new Date(dts)
     }
-    const dt_local = ((dtl: any): NaiveDate)
+    const dt_local = dtl as NaiveDate
     const vtags: Array<Src> = [v['src']] // todo hmm. shouldn't be array?
     const vourl: string = v['original_url']
     const vnurl: string = v['normalised_url']
-    const vctx: ?string = v['context']
-    const vloc: ?Locator = v['locator']
-    const vdur: ?Second = v['duration']
+    const vctx: string | null = v['context']
+    const vloc: Locator | null = v['locator']
+    const vdur: Second | null = v['duration']
     return new Visit(vourl, vnurl, dt_utc, dt_local, vtags, vctx, vloc, vdur)
 }
 

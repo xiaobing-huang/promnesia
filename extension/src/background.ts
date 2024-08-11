@@ -1,10 +1,10 @@
-/* @flow */
-
-// provided by the manifest
 // import * as browser from "webextension-polyfill"
+import browser from "webextension-polyfill"
+import type {Action, BrowserAction, Menus, PageAction, Runtime, Tabs, WebNavigation} from "webextension-polyfill"
 
-import type {Url, SearchPageParams} from './common';
-import {Visit, Visits, Blacklisted, unwrap, Methods, uuid} from './common'
+import type {Url, SearchPageParams} from './common'
+import {Visit, Visits, Blacklisted, Methods, assert, uuid} from './common'
+import {executeScript} from './compat'
 import type {Options} from './options'
 import {Toggles, getOptions, setOption, THIS_BROWSER_TAG} from './options'
 
@@ -18,19 +18,20 @@ const UUID = uuid()
 console.info('[promnesia]: running background page with UUID %s', UUID)
 
 
-type Action = chrome$browserAction | chrome$pageAction
+type Action = Action.Static | BrowserAction.Static | PageAction.Static
 
 
 function actions(): Array<Action> {
     // eh, on mobile neither pageAction nor browserAction have setIcon
     // but we can use pageAction to show at least some (default) icon in some circumstances
-
     // https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/Differences_between_desktop_and_Android#User_interface
-    const res: Array<Action> = [chrome.browserAction]
+
+    // manifest v2 doesn't have browser.action
+    const res: Array<Action> = [browser.action ? browser.action : browser.browserAction]
 
     // need to be defensive, it's only for mobile firefox
-    if (chrome.pageAction) {
-        res.push(chrome.pageAction)
+    if (browser.pageAction) {
+        res.push(browser.pageAction)
     } else {
         // this is a bit backwards because we need to register callbacks synchronously
         // otherwise isn't not working well after background page unloads
@@ -38,7 +39,7 @@ function actions(): Array<Action> {
         // see https://developer.chrome.com/docs/extensions/mv2/background_pages/#listeners
         isMobile().then(mobile => {
             if (mobile) {
-                notifyError("Expected pageAction to be present!")
+                notifyError(new Error("Expected pageAction to be present!"))
             }
         })
     }
@@ -55,10 +56,10 @@ type IconStyle = {
 }
 
 
-type TabUrl = {|
+type TabUrl = {
     url: string,
     id : number,
-|}
+}
 
 
 // TODO this can be tested?
@@ -140,19 +141,14 @@ async function updateState(tab: TabUrl): Promise<void> {
     // todo only inject after blacklist check? just in case?
     let proceed: boolean
     try {
-        await browser.tabs.insertCSS    (tabId, {file: 'sidebar-outer.css'})
-        await browser.tabs.insertCSS    (tabId, {file: 'sidebar.css'      })
-        await browser.tabs.insertCSS    (tabId, {code: opts.position_css  })
-        await browser.tabs.executeScript(tabId, {file: 'browser-polyfill.js'})
-        await browser.tabs.executeScript(tabId, {file: 'webext-options-sync.js'})
-        await browser.tabs.executeScript(tabId, {file: 'anchorme.js'})
-        if (opts.sidebar_detect_urls) {
-            // meh
-            await browser.tabs.executeScript(tabId, {file: 'sidebar.js'})
-        }
+        const target = {tabId: tabId}
+        await browser.scripting.insertCSS    ({target: target, files: ['sidebar-outer.css']})
+        await browser.scripting.insertCSS    ({target: target, files: ['sidebar.css'      ]})
+        await browser.scripting.insertCSS    ({target: target, css: opts.position_css      })
+        await executeScript                  ({target: target, files: ['sidebar.js']       })
         proceed = true // successful code injection
     } catch (error) {
-        const msg = error.message
+        const msg = (error as Error).message
         if (msg == null) {
             throw error
         }
@@ -192,6 +188,7 @@ async function updateState(tab: TabUrl): Promise<void> {
         visits = await allsources.visits(url)
     }
 
+    // eslint-disable-next-line prefer-const
     let {icon, title, text} = getIconStyle(visits)
 
     // TODO move to getIconStyle??
@@ -204,26 +201,24 @@ async function updateState(tab: TabUrl): Promise<void> {
     for (const action of actions()) {
         // ugh, some of these only present in browserAction..
         if (action.setTitle) {
-            // $FlowFixMe
              action.setTitle({
                  tabId: tabId,
                  title: title,
-             });
+             })
         }
-
         if (action.setIcon) {
-            // $FlowFixMe
             action.setIcon({
                 tabId: tabId,
                 path: icon,
-            });
+            })
         }
+        // @ts-expect-error
         if (action.setBadgeText) {
-            // $FlowFixMe
+            // @ts-expect-error
             action.setBadgeText({
                 tabId: tabId,
                 text: text,
-            });
+            })
         }
     }
 
@@ -233,7 +228,7 @@ async function updateState(tab: TabUrl): Promise<void> {
      *    otherwise, we're relying on 'mobile_sidebar_injector' to open the sidebar
      */
     if (await isMobile()) {
-        const action = chrome.pageAction;
+        const action = browser.pageAction;
         const interesting = [
             'images/ic_visited_48.png',
             'images/ic_relatives_48.png',
@@ -295,11 +290,11 @@ async function updateState(tab: TabUrl): Promise<void> {
 
 function sendSidebarMessage(tabId: number, message: any) {
     // ugh.. just so I don't shoot myself in the foot again with using runtime.sendMessage...
-    chrome.tabs.sendMessage(tabId, message)
+    browser.tabs.sendMessage(tabId, message)
 }
 
 
-async function filter_urls(urls: Array<?Url>) {
+async function filter_urls(urls: Array<Url | null>) {
     const good: Set<Url> = new Set()
     for (const u of urls) {
         if (u == null || !u.includes('://')) {
@@ -320,33 +315,38 @@ async function filter_urls(urls: Array<?Url>) {
 }
 
 
-async function doToggleMarkVisited(tabId: number, {show}: {show: ?boolean} = {show: null}) {
+
+async function doToggleMarkVisited(tabId: number, {show}: {show: boolean | null} = {show: null}) {
     // first check if we need to disable TODO
-    const _should_show = await browser.tabs.executeScript(tabId, {
-        code: `
-{
-    let res // ?boolean
-    let show = ${show == null ? 'null' : String(show)}
-    const shown = window.promnesiaShowsVisits || false
-    if (show == null) {
-        // we want the opposite
-        show = !shown
-    }
-    if (show === shown) {
-        res = null // no change
-    } else if (show) {
-        res = true // should show
-        window.promnesiaShowsVisits = true // ugh. set early to avoid race conditions...
-    } else {//
-        res = false // should hide
-        setTimeout(() => hideMarks()) // async to return straightaway
-        window.promnesiaShowsVisits = false
-    }
-    res
-}
-`})
-    const should_show: ?boolean = unwrap(_should_show)[0]
-    if (should_show == null) {
+    const target = {tabId: tabId}
+    const should_show = await executeScript<boolean | null>({
+        target: target,
+        func: (show: boolean) => {
+            let res: boolean | null
+            // @ts-expect-error
+            const shown = window.promnesiaShowsVisits || false
+            if (show == null) {
+                // we want the opposite
+                show = !shown
+            }
+            if (show === shown) {
+                res = null // no change
+            } else if (show) {
+                res = true // should show
+                // @ts-expect-error
+                window.promnesiaShowsVisits = true // ugh. set early to avoid race conditions...
+            } else {
+                res = false // should hide
+                // @ts-expect-error hideMarks is declared in showvisited.js
+                setTimeout(() => hideMarks()) // async to return straightaway
+                // @ts-expect-error
+                window.promnesiaShowsVisits = false
+            }
+            return res
+        },
+        args: [show],
+    })
+    if (should_show === null) {
         console.debug('requested state %s: no change needed', show)
         return
     } else if (should_show === false) {
@@ -355,22 +355,23 @@ async function doToggleMarkVisited(tabId: number, {show}: {show: ?boolean} = {sh
     }
 
     // collect URLS from the page
-    const mresults = await browser.tabs.executeScript(tabId, {
-        code: `
-     // NOTE: important to make a snapshot here.. otherwise might go in an infinite loop
-     link_elements = Array.from(document.getElementsByTagName("a"))
-     link_elements.map(el => {
-        try {
-            // handle relative urls
-            return new URL(el.href, document.baseURI).href
-        } catch {
-            return null
+    const results = await executeScript<Array<Url | null>>({
+        target: target,
+        func: () => {
+            // NOTE: important to make a snapshot here.. otherwise might go in an infinite loop
+            const links = Array.from(document.getElementsByTagName("a"))
+            // @ts-expect-error
+            window.link_elements = links
+            return links.map(el => {
+                try {
+                    // handle relative urls
+                    return new URL(el.href, document.baseURI).href
+                } catch {
+                    return null
+                }
+            })
         }
-     })
- `
-})
-    // not sure why it's returning array..
-    const results: Array<?Url> = unwrap(mresults)[0]
+    })
     const page_urls = Array.from(await filter_urls(results))
     const resp = await allsources.visited(page_urls)
     if (resp instanceof Error) {
@@ -381,7 +382,7 @@ async function doToggleMarkVisited(tabId: number, {show}: {show: ?boolean} = {sh
     const visited: Map<Url, Visit> = new Map()
     for (let i = 0; i < page_urls.length; i++) {
         // NOTE: response is guaranteed to have the same length
-        let r = resp[i]
+        const r = resp[i]
         if (r == null) {
             continue
         }
@@ -407,7 +408,7 @@ async function doToggleMarkVisited(tabId: number, {show}: {show: ?boolean} = {sh
     }
 
     for (const url of page_urls) {
-        let v = visited.get(url)
+        const v = visited.get(url)
         if (v == null) {
             continue
         }
@@ -417,21 +418,24 @@ async function doToggleMarkVisited(tabId: number, {show}: {show: ?boolean} = {sh
             visited.delete(url)
         }
     }
-    // todo ugh. errors inside the script (e.g. syntax errors) get swallowed..
-    // TODO not sure.. probably need to inject the script once and then use a message listener or something like in sidebar??
-    await browser.tabs.insertCSS(tabId, {
-        file: 'showvisited.css',
-    })
-    await browser.tabs.executeScript(tabId, {
-        file: 'showvisited.js',
-    })
-    await browser.tabs.executeScript(tabId, {
-        code: `
-visited = new Map(JSON.parse(${JSON.stringify(JSON.stringify([...visited]))}))
-setTimeout(() => showMarks())
-// best to set it in case of partial processing
-window.promnesiaShowsVisits = true
-`
+    await browser.scripting.insertCSS    ({target: target, files: ['showvisited.css']})
+    await executeScript({target: target, files: ['showvisited.js' ]})
+    await executeScript({
+        target: target,
+        func: (visited_entries: Array<[Url, any]>) => {
+            // FIXME ok, the only thing I'm not sure about is how it preserves Visit objects?
+            // but I suspect this is consistent with previous version of code anyway
+            const visited = new Map(visited_entries)
+            // @ts-expect-error
+            window.visited = visited
+            // @ts-expect-error
+            setTimeout(() => showMarks())
+            // best to set it in case of partial processing
+            // @ts-expect-error
+            window.promnesiaShowsVisits = true
+        },
+        // ugh. need to make sure it's json serializable
+        args: [Array.from(visited, ([key, value]) => [key, value.toJObject()])],
     })
 }
 
@@ -454,7 +458,7 @@ function isSpecialProtocol(url: string): boolean {
     return false;
 }
 
-function ignored(url: ?string): ?string {
+function ignored(url: string | null): string | null {
     if (url == null) {
         return 'URL not set'
     }
@@ -488,7 +492,7 @@ function ignored(url: ?string): ?string {
   TODO: might be interesting to start loading things in "before" instead -- could update icon etc earlier?
  **/
 // TODO maybe best to add filter object so the callback doesn't fire at all
-browser.webNavigation.onCompleted.addListener(defensify(async (detail: browser$WebNavigationDetail) => {
+browser.webNavigation.onCompleted.addListener(defensify(async (detail: WebNavigation.OnCompletedDetailsType) => {
     const fid = detail.frameId
     const url = detail.url
     if (fid == null || url == null) {
@@ -510,7 +514,7 @@ browser.webNavigation.onCompleted.addListener(defensify(async (detail: browser$W
     try {
         await updateState({url: url, id: detail.tabId})
     } catch (error) {
-        const message = error.message
+        const message = (error as Error).message
         if (message == null) {
             throw error
         }
@@ -526,10 +530,10 @@ browser.webNavigation.onCompleted.addListener(defensify(async (detail: browser$W
         }
         throw error
     }
-}, 'webNavigation.onCompleteed'))
+}, 'webNavigation.onCompleted'))
 
 
-export async function getActiveTab(): Promise<?TabUrl> {
+export async function getActiveTab(): Promise<TabUrl | null> {
     const tabs = await browser.tabs.query({
         currentWindow: true,
         active: true,
@@ -549,20 +553,20 @@ export async function getActiveTab(): Promise<?TabUrl> {
 }
 
 
-type ShouldProcess = {|
+type ShouldProcess = {
     url: string,
     tid: number,
-|}
+}
 
 // check if page needs handling and notify suer if/why it can't be processed
-async function shouldProcessPage(tab: ?TabUrl): Promise<?ShouldProcess> {
+async function shouldProcessPage(tab: TabUrl | null): Promise<ShouldProcess | null> {
     if (tab == null) {
         await notifications.page_ignored(null, null, "Couldn't determine current tab: must be a special page (or a bug?)")
-        return
+        return null
     }
-    const url = unwrap(tab.url)
-    const tid = unwrap(tab.id)
-    let ireason = ignored(url)
+    const url = tab.url!
+    const tid = tab.id!
+    const ireason = ignored(url)
     if (ireason != null) {
         await notifications.page_ignored(tid, url, ireason)
         return null
@@ -586,23 +590,22 @@ async function handleToggleMarkVisited() {
     // TODO actually use mark visited setting?
     // const opts = await getOptions();
     const atab = await getActiveTab()
-    let should = await shouldProcessPage(atab)
+    const should = await shouldProcessPage(atab)
     if (should == null) {
         return
     }
-    let {tid: tid} = should
+    const {tid: tid} = should
     await doToggleMarkVisited(tid) // no need to await?
 }
 
 async function handleOpenSearch(p: SearchPageParams = {}) {
     const params = new URLSearchParams()
     for (const [k, v] of Object.entries(p)) {
-        // $FlowFixMe
         params.append(k, v)
     }
     const ps = params.toString()
-    const search_url = chrome.runtime.getURL('search.html') + (ps.length == 0 ? '' : '?' + ps)
-    chrome.tabs.create({url: search_url})
+    const search_url = browser.runtime.getURL('search.html') + (ps.length == 0 ? '' : '?' + ps)
+    browser.tabs.create({url: search_url})
     // TODO get current tab url and pass as get parameter?
 }
 
@@ -662,7 +665,7 @@ export async function toggleSidebarOnTab(tab: TabUrl) {
 
 export async function handleToggleSidebar() {
     const atab = await getActiveTab()
-    toggleSidebarOnTab(unwrap(atab))
+    toggleSidebarOnTab(atab!)
 }
 
 /*
@@ -675,8 +678,10 @@ export async function handleToggleSidebar() {
 function registerActions() {
     // NOTE: on mobile, this sets action for both icon (if it's displayed) and in the menu
     for (const action of actions()) {
-        // $FlowFixMe
-        action.onClicked.addListener(defensify(toggleSidebarOnTab, 'action.onClicked'))
+        action.onClicked.addListener(defensify(
+            (tab: Tabs.Tab) => toggleSidebarOnTab({url: tab.url!, id: tab.id!}),
+            'action.onClicked',
+        ))
     }
 }
 
@@ -699,38 +704,36 @@ const onCommandCallback = defensify(async cmd => {
 }, 'onCommand')
 
 
-type MenuInfo = {
-    menuItemId: string,
-    linkUrl?: string,
-}
-
-
 async function active(): Promise<TabUrl> {
-    return unwrap(await getActiveTab())
+    return (await getActiveTab())!
 }
 
 
 async function globalExcludelistPrompt(): Promise<Array<Url>> {
     // NOTE: needs to take active tab becaue tab isn't present in the 'info' object if it was clicked from the launcher etc.
     const {id: tabId, url: url} = await active()
-    let prompt = `Global excludelist. Supported formats:
+    const prompt_msg = `Global excludelist. Supported formats:
 - domain.name, e.g.: web.telegram.org
       Will exclude whole Telegram website.
 - http://exact/match, e.g.: http://github.com
       Will only exclude Github main page. Subpages will still work.
 - /regul.r.*expression/, e.g.: /github.*/yourusername/
       Quick way to exclude your own Github repostitories.
-`;
+`
 
     // ugh. won't work for multiple urls, prompt can only be single line...
-    const res = await browser.tabs.executeScript(tabId, {
-        code: `prompt(\`${prompt}\`, "${url}");`
+    const res = await executeScript<Url | null>({
+        target: {tabId: tabId},
+        func: (prompt_msg: string, url: string) => {
+            return prompt(prompt_msg, url)
+        },
+        args: [prompt_msg, url],
     })
-    if (res == null || res[0] == null) {
+    if (res == null) {
         console.info('user chose not to add %s', url)
         return []
     }
-    return [res[0]]
+    return [res]
 }
 
 async function handleAddToGlobalExcludelist() {
@@ -760,56 +763,61 @@ const AddToMarkVisitedExcludelist = {
         // TODO only call prompts if more than one? sort before showing?
         const {id: tabId, url: _url} = await active()
 
-        await browser.tabs.executeScript(tabId, {
-            code: `{
-let listener = e => {
-    e.stopPropagation()
+        // TODO ugh at this point could just move to external file?
+        await executeScript({
+            target: {tabId: tabId},
+            func: (method_zapper_excludelist: string) => {
+                const listener = (e: MouseEvent) => {
+                    e.stopPropagation()
 
-    const tgt = e.target
-    const old = tgt.style.outline
+                    const tgt = e.target!
+                    // @ts-expect-error
+                    const tgt_style = tgt.style
+                    const old = tgt_style.outline
 
-    tgt.addEventListener('mouseout', e => {
-        tgt.style.outline = old
-    })
-    // display zapper frame
-    tgt.style.outline = '4px solid #07C'
-    // todo use css class?
-}
-document.addEventListener('mouseover', listener)
+                    tgt.addEventListener('mouseout', (_e) => {
+                        tgt_style.outline = old
+                    })
+                    // display zapper frame
+                    tgt_style.outline = '4px solid #07C'
+                    // todo use css class?
+                }
+                document.addEventListener('mouseover', listener)
 
-document.addEventListener('click', e => {
-    // console.error("CLiCK!!! %o", e)
-    document.removeEventListener('mouseover', listener)
+                document.addEventListener('click', (e: MouseEvent) => {
+                    document.removeEventListener('mouseover', listener)
 
-    // FIXME ugh. it also captures file:// links and javascript:
-    // should't traverse inside promnesia clases...
-    let links = Array.from(e.target.getElementsByTagName('a')).map(el => {
-        const href = el.href
-        if (href == null) {
-            return null
-        }
-        try {
-            // handle relative urls
-            return new URL(href, document.baseURI).href
-        } catch (e) {
-            console.error(e)
-            return null
-        }
-    }).filter(e => e != null)
-    links = [...new Set(links)].sort() // make unique
-    //
-    chrome.runtime.sendMessage({method: '${Methods.ZAPPER_EXCLUDELIST}', data: links})
-})
-let cancel = e => {
-    // console.error("ESCAPE!!!, %o", e)
-    if (e.key == 'Escape') {
-        document.removeEventListener('mouseover', listener)
-        window.removeEventListener('keydown', cancel)
-    }
-}
-window.addEventListener('keydown', cancel)
-
-}`})
+                    // FIXME ugh. it also captures file:// links and javascript:
+                    // should't traverse inside promnesia clases...
+                    // @ts-expect-error
+                    let links = Array.from(e.target.getElementsByTagName('a')).map((el: HTMLAnchorElement) => {
+                        const href = el.href
+                        if (href == null) {
+                            return null
+                        }
+                        try {
+                            // handle relative urls
+                            return new URL(href, document.baseURI).href
+                        } catch (e) {
+                            console.error(e)
+                            return null
+                        }
+                    }).filter(e => e != null)
+                    links = Array.from(new Set(links)).sort() // make unique
+                    // @ts-expect-error
+                    chrome.runtime.sendMessage({method: method_zapper_excludelist, data: links})
+                })
+                const cancel = (e: KeyboardEvent) => {
+                    // console.error("ESCAPE!!!, %o", e)
+                    if (e.key == 'Escape') {
+                        document.removeEventListener('mouseover', listener)
+                        window.removeEventListener('keydown', cancel)
+                    }
+                }
+                window.addEventListener('keydown', cancel)
+            },
+            args: [Methods.ZAPPER_EXCLUDELIST],
+        })
     },
     handleZapperResult: async function(msg: any) {
         const urls: Array<Url> = msg.data
@@ -854,8 +862,8 @@ ${surl}
             },
         )
     },
-    onMenuClick: async function(info: MenuInfo, _tab: chrome$Tab) {
-        const url = unwrap(info.linkUrl)
+    onMenuClick: async function(info: Menus.OnClickData, _tab: Tabs.Tab) {
+        const url = info.linkUrl!
         await AddToMarkVisitedExcludelist.add([url])
     },
 }
@@ -864,12 +872,11 @@ ${surl}
 
 
 
-const DEFAULT_CONTEXTS = ['page', 'browser_action']
 type MenuEntry = {
     id: string,
     title: string,
-    callback: ?((info: MenuInfo, tab: chrome$Tab) => Promise<void>),
-    contexts?: Array<chrome$ContextType>, // NOTE: not present interpreted as DEFAULT_CONTEXTS
+    callback: ((info: Menus.OnClickData, tab: Tabs.Tab) => Promise<void>) | null,
+    contexts?: Array<Menus.ContextType>, // NOTE: not present interpreted as DEFAULT_CONTEXTS
     parentId?: string,
 }
 
@@ -908,8 +915,7 @@ const MENUS: Array<MenuEntry> = [
     },
 ]
 
-type MenuToggle = {
-    ...MenuEntry,
+type MenuToggle = MenuEntry & {
     checker: (opts: Options) => boolean,
 }
 
@@ -942,7 +948,7 @@ function hasContextMenus(): boolean {
     if (browser.contextMenus == undefined) {
         isMobile().then(mobile => {
             if (!mobile) {
-                notifyError("error: chrome.contextMenus should be available")
+                notifyError(new Error("chrome.contextMenus should be available"))
             }
         })
         return false
@@ -956,6 +962,11 @@ function initContextMenus(): void {
         return
     }
 
+    const DEFAULT_CONTEXTS: Array<Menus.ContextType> = [
+        'page',
+        browser.action ? 'action' : 'browser_action',  // support both mv2 and mv3
+    ]
+
     /*
     Normally, you'd create context menu in chrome.runtime.onInstalled, since browser remembers context menu items in between installs.
     see https://stackoverflow.com/a/19578984/706389
@@ -967,7 +978,7 @@ function initContextMenus(): void {
     */
     browser.contextMenus.removeAll().then(() => {
         for (const {id: id, title: title, parentId: parentId, contexts: contexts} of MENUS) {
-            chrome.contextMenus.create({
+            browser.contextMenus.create({
                 id: id,
                 parentId: parentId,
                 title: title,
@@ -976,7 +987,7 @@ function initContextMenus(): void {
         }
 
         for (const {id: id, title: title, parentId: parentId, contexts: contexts} of TOGGLES) {
-            chrome.contextMenus.create({
+            browser.contextMenus.create({
                 id: id,
                 parentId: parentId,
                 title: title,
@@ -988,7 +999,8 @@ function initContextMenus(): void {
     })
 
     // need to keep these callbacks here, since onInstalled above isn't called when background page resumes
-    const onMenuClickedCallback = defensify(async (info: MenuInfo, tab: chrome$Tab) => {
+    const onMenuClickedCallback = defensify(async (info: Menus.OnClickData, tab: Tabs.Tab | undefined) => {
+        assert(tab != null)
         const mid = info.menuItemId
         for (const m of [...MENUS, ...TOGGLES]) {
             if (mid == m.id) {
@@ -1003,7 +1015,6 @@ function initContextMenus(): void {
 
     // seems that it's best to keep onClicked listenere here (instead of inside removeAll)
     // otherwise it's not working in firefox
-    // $FlowFixMe[incompatible-call] flow complains presumably because of defensify
     browser.contextMenus.onClicked.addListener(onMenuClickedCallback)
 }
 
@@ -1013,7 +1024,7 @@ function updateContextMenus(opts: Options): void {
         return
     }
     for (const {id: id, checker: checker} of TOGGLES) {
-        chrome.contextMenus.update(
+        browser.contextMenus.update(
             id,
             {checked: checker(opts)},
         )
@@ -1025,19 +1036,17 @@ function initBackground(): void {
     // NOTE: callback registering needs to be synchronous
     // otherwise doesn't work well with background page suspension
 
-    // $FlowFixMe
-    chrome.runtime.onMessage.addListener(onMessageCallback)
+    browser.runtime.onMessage.addListener(onMessageCallback)
 
     registerActions()
 
     // need to be defensive since commands API isn't available under mobile browser
-    if (chrome.commands) {
-        //  $FlowFixMe // err, complains at Promise but nevertheless works
-        chrome.commands.onCommand.addListener(onCommandCallback)
+    if (browser.commands) {
+        browser.commands.onCommand.addListener(onCommandCallback)
     } else {
         isMobile().then(mobile => {
             if (!mobile) {
-                notifyError("error: chrome.commands should be available")
+                notifyError(new Error("chrome.commands should be available"))
             }
         })
     }
@@ -1046,12 +1055,15 @@ function initBackground(): void {
 }
 
 
-chrome.runtime.onMessage.addListener((info: any, _: chrome$MessageSender) => {
+browser.runtime.onMessage.addListener((info: any, _: Runtime.MessageSender) => {
     // see selenium_bridge.js
-    if (info === 'selenium-bridge-activate') {
+    if (info === 'selenium-bridge-_execute_action') {
         handleToggleSidebar()
     }
-    if (info === 'selenium-bridge-mark-visited') {
+    if (info === 'selenium-bridge-_execute_browser_action') {
+        handleToggleSidebar()
+    }
+    if (info === 'selenium-bridge-mark_visited') {
         handleToggleMarkVisited()
     }
     if (info === 'selenium-bridge-search') {

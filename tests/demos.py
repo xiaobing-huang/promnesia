@@ -8,16 +8,16 @@ from typing import Optional
 from promnesia.tests.utils import index_urls
 
 from common import uses_x
-from end2end_test import FF, CH, browsers, _test_helper
+from end2end_test import FF, CH, browsers, _test_helper  # type: ignore[attr-defined]
 from end2end_test import confirm
-from end2end_test import configure, get_window_id
+from end2end_test import configure_extension  # type: ignore[attr-defined]
+from addon_helper import get_window_id
 
 from record import record, hotkeys, CURSOR_SCRIPT, SELECT_SCRIPT
 
 
 def real_db():
-    from private import real_db_path, test_filter  # type: ignore[import,attr-defined]
-    from tempfile import TemporaryDirectory
+    from private import real_db_path, test_filter  # type: ignore[import-not-found]
     import shutil
     def indexer(tdir: Path):
         tdb = tdir / 'promnesia.sqlite'
@@ -50,7 +50,7 @@ class Annotator:
         self.l.append((now, text, length))
 
     def build(self, **extra):
-        from pysubs2 import SSAFile, SSAEvent, Color # type: ignore[import]
+        from pysubs2 import SSAFile, SSAEvent, Color # type: ignore[import-not-found]
         millis = lambda td: td / timedelta(milliseconds=1)
         subs = (
             SSAEvent(
@@ -130,7 +130,7 @@ def demo_helper(*, tmp_path, browser, path: Path, indexer=real_db, before=None, 
         if 'highlights' not in extras:
             extras['highlights'] = False
 
-        configure(
+        configure_extension(
             driver,
             host=None, port=None, # TODO meh
             notify_contexts=False,
@@ -445,7 +445,7 @@ Clicking on 'context' will bring me straight to the original tweet.
         wait(8)
 
 
-from selenium import webdriver # type: ignore
+from selenium import webdriver
 
 
 def scroll_to_text(driver, text: str):
@@ -473,7 +473,7 @@ def test_demo_highlights(tmp_path, browser):
 
 
     def before(driver):
-        from private import instapaper_cookies  # type: ignore[import,attr-defined]
+        from private import instapaper_cookies
 
         # necessary to set cookies on instapaper..
         driver.get('http://instapaper.com')
@@ -509,7 +509,7 @@ I'm using Instapaper to read and highlight articles while I'm offline on my phon
         # TODO go to div class="source" -> a class="original"
         # driver without the extension
         ORIG = 'http://nautil.us/issue/66/clockwork/haunted-by-his-brother-he-revolutionized-physics-rp'
-        with get_webdriver(browser, extension=False) as driver2:
+        with get_webdriver(browser, extension=False) as driver2:  # type: ignore[misc,call-arg]
             driver2.get(ORIG)
 
             # TODO maybe, have annotation 'start' and 'interrupt'?
@@ -542,6 +542,9 @@ Highlights are displayed within the original page!
         helper.activate()
         wait(2)
 
+        # TODO this used to be used for screenshots
+        # # ugh, webdriver's save_screenshot doesn't behave well with frames
+        # check_call(['import', '-window', self.wid(), path])
         helper.screenshot(path.with_suffix('.png'))
 
         annotate('''

@@ -1,10 +1,6 @@
-// hmm. for some reason esm version isn't properly working with CSS??
-// but umd bundle does???
-// import tippy from '../node_modules/tippy.js/dist/tippy.esm.js'
-// import tippy from '../node_modules/tippy.js/dist/tippy-bundle.umd.js'
-// OK, headless is better because it doesn't inject extra CSS
+// headless is better because it doesn't inject extra CSS
 // also not causing issues with unsafe HTML assignment
-import tippy from '../node_modules/tippy.js/headless/dist/tippy-headless.esm.js'
+import tippy from "tippy.js/headless"
 
 // 'API': take
 // - link_element: list of <a> DOM elements on the page
@@ -82,7 +78,7 @@ function formatVisit(v) {
     }
     const e_at = document.createElement('span')
     e_at.classList.add('datetime')
-    e_at.textContent = `${new Date(dt).toLocaleString()}`
+    e_at.textContent = new Date(dt).toLocaleString()
     e.appendChild(e_at)
     return e
 }
@@ -125,7 +121,7 @@ function showMark(element) {
     const url = element.href
     // 'visited' passed in backgroud.js
     // eslint-disable-next-line no-undef
-    const v = visited.get(url)
+    const v = window.visited.get(url)
     if (!v) {
         return // no visits or was excluded (add some data attribute maybe?)
     }
@@ -147,6 +143,7 @@ function showMark(element) {
             content: popup,
             maxWidth: "none",  /* default makes it wrap over */
             interactive: true,  // so it's not hiding on hover
+            hideOnClick: false,  // default is true, and clicking hides the 'pinned' tippies
             plugins: [pinOnDoubleClick],
 
             // todo could make configurable? it might break accessibility https://github.com/atomiks/tippyjs/blob/master/MIGRATION_GUIDE.md#props-1
@@ -155,7 +152,6 @@ function showMark(element) {
             /* useful for debugging */
             // trigger: "manual",
             // showOnCreate: true,
-            // hideOnClick: false,
         })
     } catch (e) {
         console.error('[promnesia]: error while adding tooltip to %o', element)

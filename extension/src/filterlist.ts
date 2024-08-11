@@ -1,8 +1,7 @@
-/* @flow */
-import type {Url} from './common';
+import type {Url} from './common'
 import {getOptions} from './options'
 import {asList, fetch_max_stale} from './common'
-import {normalisedURLHostname} from './normalise';
+import {normalisedURLHostname} from './normalise'
 
 type Reason = string
 
@@ -26,7 +25,7 @@ export class Filterlist {
     }
 
     // TODO use some extra cache?
-    _helper(url: Url): ?Reason {
+    _helper(url: Url): Reason | null {
         // https://github.com/gorhill/uBlock/wiki/How-to-whitelist-a-web-site kind of following this logic and syntax
 
         const noslash = url.replace(/\/+$/, '') // meh
@@ -68,12 +67,12 @@ export class Filterlist {
 
         console.debug('loading %s from %s', name, url)
 
-        // clear old basket.js local storge
-        for (const key of Object.keys(localStorage)) {
-            if (key.startsWith('basket-')) {
-                localStorage.removeItem(key)
-            }
-        }
+        // clear old basket.js local storge  // FIXME not sure?
+        // for (const key of Object.keys(localStorage)) {
+        //     if (key.startsWith('basket-')) {
+        //         localStorage.removeItem(key)
+        //     }
+        // }
 
         if (url.includes('/cbuijs/shallalist/')) {
             // use my fork just in case... they stopped updating the list anyway
@@ -106,7 +105,7 @@ export class Filterlist {
         return list;
     }
 
-    async contains(url: Url): Promise<?Reason> {
+    async contains(url: Url): Promise<Reason | null> {
         try {
             new URL(url);
         } catch {
@@ -121,9 +120,9 @@ export class Filterlist {
 
         const hostname = normalisedURLHostname(url);
         // TODO perhaps use binary search?
-        for (let spec of this.urllists) {
-            let bname = spec[0]
-            let bfile = spec[1]
+        for (const spec of this.urllists) {
+            const bname = spec[0]
+            const bfile = spec[1]
             const domains = await this._list(bname, bfile);
             if (domains.has(hostname)) {
                 return `'${bname}' filterlist`

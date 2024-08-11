@@ -1,6 +1,8 @@
-/* @flow */
-import type {Url, Src, Locator} from './common';
-import {Methods, unwrap, safeSetInnerHTML} from './common';
+import browser from "webextension-polyfill"
+import anchorme from "anchorme"
+
+import type {Url, Src, Locator} from './common'
+import {Methods, safeSetInnerHTML} from './common'
 import type {Options} from './options'
 
 export function _fmt(dt: Date): [string, string] {
@@ -11,10 +13,11 @@ export function _fmt(dt: Date): [string, string] {
     const dts = dt.toString()
     const parts = dts.split(' ')
     // smth like Tue Nov 03 2020 01:53:46 GMT+0000
-    var [mon, day, year] = parts.slice(1, 4)
+    // eslint-disable-next-line prefer-const
+    let [mon, day, year] = parts.slice(1, 4)
     day = day[0] == '0' ? day[1] : day
     // eslint-disable-next-line no-unused-vars
-    var [hh , mm , ss] = parts[4].split(':')
+    const [hh , mm , _ss] = parts[4].split(':')
 
     const datestr = `${day} ${mon} ${year}`
     const timestr = `${hh}:${mm}`
@@ -22,12 +25,12 @@ export function _fmt(dt: Date): [string, string] {
 }
 
 type Params = {
-    idx: ?number;
+    idx: number | null;
     timestamp: Date;
-    original_url: ?Url;
-    normalised_url: ?Url;
-    context: ?string;
-    locator: ?Locator;
+    original_url: Url | null;
+    normalised_url: Url | null;
+    context: string | null;
+    locator: Locator | null;
     relative: boolean;
 }
 
@@ -52,7 +55,7 @@ export class Binder {
         this.options = options
     }
 
-    makeChild(parent: HTMLElement, name: string, classes: ?Array<CssClass> = null): HTMLElement {
+    makeChild(parent: HTMLElement, name: string, classes: Array<CssClass> | null = null): HTMLElement {
         const res = this.doc.createElement(name);
         if (classes != null) {
             for (const cls of classes) {
@@ -73,15 +76,14 @@ export class Binder {
         parent: HTMLElement,
         error: Error,
     ): Promise<void> {
-        // $FlowFixMe[method-unbinding]
         const child  = this.makeChild .bind(this)
-        // $FlowFixMe[method-unbinding]
         const tchild = this.makeTchild.bind(this)
 
         const item = child(parent, 'li', ['error'])
         const ec   = child(item  , 'code')
         // todo not sure if need any other info?
-        tchild(ec, `${error.name}: ${error.message}\n${error.stack}`)
+        // sigh.. in chrome stack includes name and message already.. but not in firefox
+        tchild(ec, `${error}\n${error.stack}`)
     }
 
     async render(
@@ -99,10 +101,7 @@ export class Binder {
             relative,
         }: Params,
     ): Promise<HTMLElement> {
-        // todo ugh. looks like Flow can't guess the type of closure that we get by .bind...
-        // $FlowFixMe[method-unbinding]
         const child = this.makeChild.bind(this);
-        // $FlowFixMe[method-unbinding]
         const tchild = this.makeTchild.bind(this); // TODO still necessary??
 
         const item = child(parent, 'li', relative ? ['relative'] : []);
@@ -116,10 +115,11 @@ export class Binder {
         const date_c = child(dt_c, 'span', ['date']);
         item.setAttribute('data-sources', asClass(tags.join(' ')));
 
-        const child_link = child(relative_c, 'a');
+        const child_link = child(relative_c, 'a') as HTMLAnchorElement
         // ugh. not sure why opening in new tab doesn't work :(
         // https://stackoverflow.com/questions/12454382/target-blank-is-not-working-in-firefox/12454474#12454474
         // child_link.target = '_blank';
+        // @ts-expect-error
         child_link.href = original_url;
         tchild(child_link, '➤➤');
 
@@ -140,7 +140,7 @@ export class Binder {
         dt_c.onclick = () => {
             // TODO not sure about floor...
             const utc_timestamp_s = Math.floor(timestamp.getTime() / 1000);
-            chrome.runtime.sendMessage({
+            browser.runtime.sendMessage({
                 method   : Methods.SEARCH_VISITS_AROUND,
                 utc_timestamp_s: utc_timestamp_s,
             });
@@ -152,7 +152,8 @@ export class Binder {
         if (context != null) {
             const ctx_c = child(item, 'div', ['context'])
 
-            // ugh.. so much code foe something so simple
+            // ugh.. so much code for something so simple
+            // eslint-disable-next-line no-inner-declarations
             function do_simple(text: string) {
                 for (const line of text.split('\n')) {
                     tchild(ctx_c, line)
@@ -178,18 +179,20 @@ export class Binder {
                 // }
                 // note: performance is OK
                 // 339 iterations passed, took  200  ms -- and it's counting other DOM operations as well
-                if (window.promnesia_anchorme != null) {
-                    const anchorme = window.promnesia_anchorme.default
+                // if (window.promnesia_anchorme != null) {
+                    // const anchorme = window.promnesia_anchorme.default
+                    // TODO for now keeping this anchorme garbage above
+                    // since later hoping to make import dynamic gain
                     handle_plain = (text: string) => {
                         try {
-                            const res = unwrap(anchorme)(text)
+                            const res = anchorme(text)
                             safeSetInnerHTML(ctx_c, res)
                         } catch (err) { // just in case..
                             console.error(err)
                             do_simple(text)
                         }
                     }
-                }
+                // }
             }
 
             let ctx = context;
@@ -208,9 +211,8 @@ export class Binder {
             if (loc.href === null) {
                 tchild(loc_c, loc.title);
             } else {
-                const link = child(loc_c, 'a');
+                const link = child(loc_c, 'a') as HTMLAnchorElement
                 link.title = 'Jump to the context';
-                // $FlowFixMe
                 link.href = loc.href;
 
                 // _self seems to "work" only for the "editor://" protocol. Avoids opening a new tab for "editor://" links. Nttp links then require a middle-click, which is undesirable. With normal click, they would not open at all.
@@ -246,8 +248,8 @@ export class Binder {
         // right, this is for search..
         if (normalised_url != null) {
             const nurl_c = child(item, 'div', ['normalised_url']);
-            const link = child(nurl_c, 'a');
-            link.href = unwrap(original_url);
+            const link = child(nurl_c, 'a') as HTMLAnchorElement
+            link.href = original_url!
             tchild(link, normalised_url);
         }
 

@@ -1,30 +1,34 @@
-/* @flow */
+import browser from "webextension-polyfill"
+import OptionsSync from 'webext-options-sync'
+
 import {getBrowser, Methods} from './common'
+
+// TODO now that I use ts, extend webext-options-sync properly with a typed interface?
 
 /* NOTE: options can only be renamed in-between store releases */
 /* maybe later will bother with migrations for consistent naming, but that would require tests first */
 
 // ugh. hacky way to support partial option setting...
-type Opt1 = {|
-    mark_visited_excludelist: string;
-|}
+type Opt1 = {
+    mark_visited_excludelist: string,
+}
 
-type Opt2 = {|
+type Opt2 = {
     // this is kept as string to preserve formatting and comments
-    blacklist: string;
-|}
+    blacklist: string,
+}
 
-type IndeterminateMixin = {|
-    sidebar_always_show: ?boolean,
-    mark_visited_always: ?boolean,
-|}
+type IndeterminateMixin = {
+    sidebar_always_show: boolean | null,
+    mark_visited_always: boolean | null,
+}
 
-type Mixin = {|
+type Mixin = {
     sidebar_always_show: boolean,
     mark_visited_always: boolean,
-|}
+}
 
-type BaseOptions = {|
+type BaseOptions = {
     host: string;
     token: string;
 
@@ -39,11 +43,6 @@ type BaseOptions = {|
 
     highlight_on: boolean;
 
-
-    ...Opt1,
-    ...Opt2,
-
-
     // kept as string to preserve formatting
     global_excludelists_ext: string;
 
@@ -57,19 +56,12 @@ type BaseOptions = {|
     /* NOTE: deprecated, perhaps should merge together with position_css and migrate propely */
     extra_css: string;
 
-|}
+} & Opt1 & Opt2
 
 
-export type StoredOptions = {|
-    ...BaseOptions,
-    ...IndeterminateMixin,
-|}
+export type StoredOptions = BaseOptions & IndeterminateMixin
 
-
-export type Options = {
-    ...BaseOptions,
-    ...Mixin,
-}
+export type Options = BaseOptions & Mixin
 
 /*
  * If true , keep ghe original timezone (stored in the database)
@@ -250,18 +242,16 @@ function defaultOptions(): StoredOptions {
 
 
 async function optSync() {
-    // uhh.. for some reason await import here works with jest
-    // whereas static import on top of file doesn't??
-    // $FlowFixMe
-    const {default: OptionsSync} = await import('webext-options-sync')
     return new OptionsSync({
+        // TODO remove suppression after https://github.com/fregante/webext-options-sync/issues/71 ?
+        // @ts-expect-error
         defaults: defaultOptions(),
     })
 }
 
 // gets the actual raw values that user set, just for the options page
 export async function getStoredOptions(): Promise<StoredOptions> {
-    const r = await (await optSync()).getAll()
+    const r = (await (await optSync()).getAll()) as StoredOptions
     let smap = r.src_map
     if (typeof smap !== 'string') {
         // old format, we used to keep as a map
@@ -293,6 +283,7 @@ async function notifyOptionsUpdated(): Promise<void> {
 // TODO would be nice to accept a substructure of Options??
 export async function setOptions(opts: StoredOptions) {
     const os = await optSync()
+    // @ts-expect-error
     await os.set(opts)
     notifyOptionsUpdated()
 }
@@ -309,8 +300,12 @@ export async function resetOptions(): Promise<void> {
     notifyOptionsUpdated()
 }
 
+export async function exportOptions(): Promise<void> {
+    await (await optSync()).exportToFile()
+}
+
 type ToggleOptionRes = () => Promise<void>
-function toggleOption(toggle: (StoredOptions) => void): ToggleOptionRes {
+function toggleOption(toggle: (arg0: StoredOptions) => void): ToggleOptionRes {
     return async () => {
         const opts = await getStoredOptions()
         toggle(opts)
@@ -319,9 +314,9 @@ function toggleOption(toggle: (StoredOptions) => void): ToggleOptionRes {
 }
 
 export const Toggles = {
-    showSidebar   : (toggleOption((opts) => { opts.sidebar_always_show = !opts.sidebar_always_show; }): ToggleOptionRes),
-    markVisited   : (toggleOption((opts) => { opts.mark_visited_always = !opts.mark_visited_always; }): ToggleOptionRes),
-    showHighlights: (toggleOption((opts) => { opts.highlight_on        = !opts.highlight_on       ; }): ToggleOptionRes),
+    showSidebar   : toggleOption((opts) => { opts.sidebar_always_show = !opts.sidebar_always_show; }),
+    markVisited   : toggleOption((opts) => { opts.mark_visited_always = !opts.mark_visited_always; }),
+    showHighlights: toggleOption((opts) => { opts.highlight_on        = !opts.highlight_on       ; }),
 }
 
 // TODO try optionsStorage.syncForm?

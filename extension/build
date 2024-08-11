@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 import argparse
 import os
+import subprocess
 from subprocess import check_call
 from pathlib import Path
-from sys import platform
+import subprocess
+import sys
 
 # right, specifying id in manifest doesn't seem to work
 # AMO responds with: Server response: Duplicate add-on ID found. (status: 400)
@@ -18,14 +20,21 @@ TARGETS = [
     'firefox',
 ]
 
-npm = "npm.cmd" if platform == "win32" else "npm"
+
+THISDIR = Path(__file__).absolute().parent
+
+
+npm = "npm.cmd" if sys.platform == "win32" else "npm"
+
 
 def main() -> None:
     p = argparse.ArgumentParser()
     p.add_argument('--release', action='store_true', help="Use release flavor of build")
     p.add_argument('--watch'  , action='store_true')
     p.add_argument('--lint'   , action='store_true')
-    p.add_argument('--publish', choices=['listed', 'unlisted'], help="Publish on chrome web store/addons.mozilla.org")
+    p.add_argument('--publish', choices=['listed', 'unlisted', 'skip'], help="Publish on chrome web store/addons.mozilla.org")
+    p.add_argument('--v3', action='store_const', const='3', dest='manifest')
+    p.add_argument('--v2', action='store_const', const='2', dest='manifest')
 
     tg = p.add_mutually_exclusive_group(required=True)
     tg.add_argument('--target', type=str, choices=TARGETS)
@@ -36,69 +45,99 @@ def main() -> None:
 
     assert target is not None
 
-    base_ext_dir = Path(__file__).absolute().parent / 'dist'
+    manifest = args.manifest or {
+        'firefox': '2',
+        'chrome': '3',
+    }[target]
+
+    base_ext_dir = THISDIR / 'dist'
     ext_dir = (base_ext_dir / target).resolve() # webext can't into symlinks
     # sadly no way to specify zip name in the regex..
     artifacts_dir = (base_ext_dir / 'artifacts' / target).resolve()
-    def webext(*args, **kwargs) -> None:
-        check_call([
-            npm, 'run', 'web-ext',
+    def webext(*args, silent: bool=False, method=subprocess.check_call):
+        return method([
+            npm, 'run', *(['--silent'] if silent else []), 'web-ext',
             '--',
             '--source-dir'   , ext_dir,
             '--artifacts-dir', artifacts_dir,
             *args,
-        ], **kwargs)
+        ])
+
+    def webext_lint() -> None:
+        # first run for human readable output
+        webext('lint', method=subprocess.run)
+
+        # second run actually checks (annoying)
+        res = webext(
+            'lint',
+            '--output=json',
+            '--no-config-discovery',  # prevent it from printing "Applying config file" to stdout
+            silent=True,  # otherwise craps in stdout
+            method=lambda cmd: subprocess.run(cmd, stdout=subprocess.PIPE, text=True),
+        )
+        import json
+        j = json.loads(res.stdout)
+        errors = j['errors']
+        if len(errors) == 0:
+            return
+
+        assert target == 'chrome' and manifest == '3', (target, manifest)  # only chrome v3 allowed to have errors at this point
+
+        assert len(errors) == 1, errors
+        [err] = errors
+        d = '"/background/service_worker" is not supported'
+        assert d in err['description'], err
+        print(f"NOTE: skipping '{d}' for chrome -- this is false positive in webext lint", file=sys.stderr)
 
     env = {
         'TARGET' : target,
         'RELEASE': 'YES' if args.release else 'NO',
         'PUBLISH': 'YES' if args.publish is not None else 'NO',
+        'MANIFEST': manifest,
         'EXT_ID' : IDS[target],
         **os.environ,
     }
 
     if args.watch:
-        check_call([
-            npm, 'run', 'watch',
-        ], env=env, cwd=str(Path(__file__).absolute().parent))
-        # TODO exec instead?
+        check_call([npm, 'run', 'watch'], env=env, cwd=str(THISDIR)) # TODO exec instead?
         return
 
-    check_call([
-        npm, 'run', 'build',
-    ], env=env, cwd=str(Path(__file__).absolute().parent))
+    check_call([npm, 'run', 'build'], env=env, cwd=str(THISDIR))
 
     if args.lint:
         # TODO --self-hosted
         # TODO warnings as errors??
-        webext('lint')
+        webext_lint()
 
         # TODO move somewhere more appropriate..
         webext('build', '-o') # -o overwrites existing artifact
 
-
     if args.release:
         assert args.lint # TODO not sure..
 
-    def firefox_release_args():
-        from firefox_dev_secrets import API_KEY, API_SECRET
-        return [
-            '--artifacts-dir', str(artifacts_dir),
-            '--api-key'      , API_KEY,
-            '--api-secret'   , API_SECRET,
-            '--id'           , IDS[target],
-        ]
-
-    if args.publish is not None:
+    if args.publish not in {None, 'skip'}:
+        # 'skip' mode is useful to build exactly same build as for the store, but without actually uploading
         assert args.lint
         assert args.release
+
+        # TODO check repo is clean?? maybe only if listed?
+        source_zip = base_ext_dir / 'promnesia-source.zip'
+        check_call(['git', 'archive', 'HEAD', '--output', source_zip], cwd=THISDIR)
+
         if 'firefox' in target:
+            from firefox_dev_secrets import API_KEY, API_SECRET
             check_call([
-                npm, 'run', 'release:amo',
+                npm, 'run', 'web-ext',
                 '--',
+                'sign',
                 '--channel', args.publish,
                 '--source-dir', str(ext_dir),
-                *firefox_release_args(),
+                '--artifacts-dir', str(artifacts_dir),
+                '--api-key'      , API_KEY,
+                '--api-secret'   , API_SECRET,
+                # seems like webext sign requires addon id to be in manifest now
+                '--amo-metadata' , THISDIR / 'amo-metadata.json',
+                '--upload-source-code', source_zip,
             ])
         elif target == 'chrome':
             assert args.publish == 'listed'  # no notion of unlisted on chrome store?
