@@ -1,35 +1,45 @@
-#!/usr/bin/python3
 from __future__ import annotations
 
 import argparse
-from dataclasses import dataclass
-from datetime import timedelta
-from functools import lru_cache
 import importlib.metadata
 import json
 import logging
 import os
+from dataclasses import dataclass
+from datetime import timedelta
+from functools import lru_cache
 from pathlib import Path
-from typing import List, NamedTuple, Dict, Optional, Any, Tuple, Protocol
-
-
-import pytz
-from pytz import BaseTzInfo
+from typing import Any, NamedTuple, Optional, Protocol
 
 import fastapi
-
-from sqlalchemy import literal, between, or_, and_, exc, select
-from sqlalchemy import Column, Table, func, types
-from sqlalchemy.sql.elements import ColumnElement
+import pytz
+from pytz import BaseTzInfo
+from sqlalchemy import (
+    Column,
+    Table,
+    and_,
+    between,
+    exc,
+    func,
+    literal,
+    or_,
+    select,
+    types,
+)
 from sqlalchemy.sql import text
+from sqlalchemy.sql.elements import ColumnElement
 
-
-from .common import PathWithMtime, DbVisit, Url, setup_logger, default_output_dir, get_system_tz
 from .cannon import canonify
+from .common import (
+    DbVisit,
+    PathWithMtime,
+    default_output_dir,
+    get_system_tz,
+    setup_logger,
+)
 from .database.load import DbStuff, get_db_stuff, row_to_db_visit
 
-
-Json = Dict[str, Any]
+Json = dict[str, Any]
 
 app = fastapi.FastAPI()
 
@@ -65,7 +75,7 @@ class ServerConfig(NamedTuple):
         })
 
     @classmethod
-    def from_str(cls, cfgs: str) -> 'ServerConfig':
+    def from_str(cls, cfgs: str) -> ServerConfig:
         d = json.loads(cfgs)
         return cls(
             db      =Path         (d['db']),
@@ -111,7 +121,7 @@ def as_json(v: DbVisit) -> Json:
     }
 
 
-def get_db_path(check: bool=True) -> Path:
+def get_db_path(*, check: bool=True) -> Path:
     db = EnvConfig.get().db
     if check:
         assert db.exists(), db
@@ -125,7 +135,7 @@ def _get_stuff(db_path: PathWithMtime) -> DbStuff:
     return get_db_stuff(db_path=db_path.path)
 
 
-def get_stuff(db_path: Optional[Path]=None) -> DbStuff: # TODO better name
+def get_stuff(db_path: Path | None=None) -> DbStuff: # TODO better name
     # ok, it will always load from the same db file; but intermediate would be kinda an optional dump.
     if db_path is None:
         db_path = get_db_path()
@@ -136,7 +146,7 @@ def db_stats(db_path: Path) -> Json:
     engine, table = get_stuff(db_path)
     query = select(func.count()).select_from(table)
     with engine.connect() as conn:
-        total = list(conn.execute(query))[0][0]
+        [(total,)] = conn.execute(query)
     return {
         'total_visits': total,
     }
@@ -172,17 +182,17 @@ def search_common(url: str, where: Where) -> VisitsResponse:
     with engine.connect() as conn:
         try:
             # TODO make more defensive here
-            visits: List[DbVisit] = [row_to_db_visit(row) for row in conn.execute(query)]
+            visits: list[DbVisit] = [row_to_db_visit(row) for row in conn.execute(query)]
         except exc.OperationalError as e:
             if getattr(e, 'msg', None) == 'no such table: visits':
-                logger.warn('you may have to run indexer first!')
+                logger.warning('you may have to run indexer first!')
                 #result['visits'] = [{an error with a msg}] # TODO
                 #return result
             raise
 
     logger.debug('got %d visits from db', len(visits))
 
-    vlist: List[DbVisit] = []
+    vlist: list[DbVisit] = []
     for vis in visits:
         dt = vis.dt
         if dt.tzinfo is None: # FIXME need this for /visits endpoint as well?
@@ -225,7 +235,7 @@ def status() -> Json:
         logger.exception(e)
         stats = {'ERROR': str(e)}
 
-    version: Optional[str]
+    version: str | None
     try:
         version = get_version()
     except Exception as e:
@@ -299,7 +309,7 @@ def search_around(request: SearchAroundRequest) -> VisitsResponse:
 
     return search_common(
         url='http://dummy.org', # NOTE: not used in the where query (below).. perhaps need to get rid of this
-        where=lambda table, url: between(
+        where=lambda table, url: between(  # noqa: ARG005
             func.strftime(
                 '%s', # NOTE: it's tz aware, e.g. would distinguish +05:00 vs -03:00
                 # this is a bit fragile, relies on cachew internal timestamp format, e.g.
@@ -322,25 +332,26 @@ def search_around(request: SearchAroundRequest) -> VisitsResponse:
 _NO_VERSION = (0, 11, 14)
 _LATEST = (9999, 9999, 9999)
 
-def as_version(version: str) -> Tuple[int, int, int]:
+def as_version(version: str) -> tuple[int, int, int]:
     if version == '':
         return _NO_VERSION
     try:
         [v1, v2, v3] = map(int, version.split('.'))
-        return (v1, v2, v3)
     except Exception as e:
         logger = get_logger()
         logger.error('error while parsing version %s', version)
         logger.exception(e)
         return _LATEST
+    else:
+        return (v1, v2, v3)
 
 
 @dataclass
 class VisitedRequest:
-    urls: List[str]
+    urls: list[str]
     client_version: str = ''
 
-VisitedResponse = List[Optional[Json]]
+VisitedResponse = list[Optional[Json]]
 
 @app.get ('/visited', response_model=VisitedResponse)
 @app.post('/visited', response_model=VisitedResponse)
@@ -352,10 +363,10 @@ def visited(request: VisitedRequest) -> VisitedResponse:
     logger = get_logger()
     logger.info('/visited %s %s', urls, client_version)
 
-    version = as_version(client_version)
+    _version = as_version(client_version)  # todo use it?
 
     nurls = [canonify(u) for u in urls]
-    snurls = list(sorted(set(nurls)))
+    snurls = sorted(set(nurls))
 
     if len(snurls) == 0:
         return []
@@ -388,7 +399,7 @@ SELECT queried, visits.*
     # brings down large queries to 50ms...
     with engine.connect() as conn:
         res = list(conn.execute(query))
-        present: Dict[str, Any] = {row[0]: row_to_db_visit(row[1:]) for row in res}
+        present: dict[str, Any] = {row[0]: row_to_db_visit(row[1:]) for row in res}
     results = []
     for nu in nurls:
         r = present.get(nu, None)

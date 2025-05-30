@@ -1,16 +1,26 @@
-from datetime import datetime
+from __future__ import annotations
+
 import re
-from typing import Iterable, List, Set, Optional, Iterator, Tuple, NamedTuple, cast
+from collections.abc import Iterable, Iterator
+from datetime import datetime
 from pathlib import Path
-
-
-from ..common import Visit, get_logger, Results, Url, Loc, from_epoch, iter_urls, PathIsh, Res, file_mtime
-
+from typing import NamedTuple, Optional, cast
 
 import orgparse
-from orgparse.date import gene_timestamp_regex, OrgDate
+from orgparse.date import OrgDate, gene_timestamp_regex
 from orgparse.node import OrgNode
 
+from promnesia.common import (
+    Loc,
+    PathIsh,
+    Res,
+    Results,
+    Url,
+    Visit,
+    file_mtime,
+    get_logger,
+    iter_urls,
+)
 
 UPDATE_ORGPARSE_WARNING = 'WARNING: please update orgparse version to a more recent (pip3 install -U orgparse)'
 
@@ -36,7 +46,7 @@ CREATED_RGX = re.compile(gene_timestamp_regex(brtype='inactive'), re.VERBOSE)
 """
 
 class Parsed(NamedTuple):
-    dt: Optional[datetime]
+    dt: datetime | None
     heading: str
 
 
@@ -74,7 +84,7 @@ def _get_heading(n: OrgNode):
     return '' if n.is_root() else n.get_heading(format='raw')
 
 
-def walk_node(*, node: OrgNode, dt: datetime) -> Iterator[Res[Tuple[Parsed, OrgNode]]]:
+def walk_node(*, node: OrgNode, dt: datetime) -> Iterator[Res[tuple[Parsed, OrgNode]]]:
     try:
         parsed = _parse_node(node)
     except Exception as e:
@@ -98,7 +108,7 @@ def get_body_compat(node: OrgNode) -> str:
             # get_body was only added to root in 0.2.0
             for x in warn_old_orgparse_once():
                 # ugh. really crap, but it will at least only warn once... (becaue it caches)
-                raise x
+                raise x  # noqa: B904
             return UPDATE_ORGPARSE_WARNING
         else:
             raise e

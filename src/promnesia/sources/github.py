@@ -1,16 +1,14 @@
 '''
 Uses [[https://github.com/karlicoss/HPI][HPI]] github module
 '''
+from __future__ import annotations
 
 # Note: requires the 'mistletoe' module if you enable render_markdown
-
-from typing import Optional, Set
-
-from ..common import Results, Visit, Loc, iter_urls, logger
+from promnesia.common import Loc, Results, Visit, iter_urls, logger
 
 
 def index(*, render_markdown: bool = False) -> Results:
-    from . import hpi
+    from . import hpi  # noqa: F401,I001
     from my.github.all import events
 
     if render_markdown:
@@ -29,7 +27,7 @@ def index(*, render_markdown: bool = False) -> Results:
             continue
 
         # if enabled, convert the (markdown) body to HTML
-        context: Optional[str] = e.body
+        context: str | None = e.body
         if e.body is not None and render_markdown:
             context = TextParser(e.body)._doc_ashtml()  # type: ignore[possibly-undefined]
 
@@ -59,7 +57,7 @@ def index(*, render_markdown: bool = False) -> Results:
         #
         # Note: this set gets reset every event, is here to
         # prevent duplicates between URLExtract and the markdown parser
-        emitted: Set[str] = set()
+        emitted: set[str] = set()
         for url in iter_urls(e.body):
             if url in emitted:
                 continue

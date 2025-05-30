@@ -1,14 +1,24 @@
+from __future__ import annotations
+
+from collections.abc import Iterator
 from pathlib import Path
-from typing import Iterator, NamedTuple, Optional
+from typing import NamedTuple
 
-from ..common import Extraction, Url, PathIsh, Res, Visit, Loc, file_mtime, logger
+import mistletoe  # type: ignore[import-untyped]
+import mistletoe.block_token as BT  # type: ignore[import-untyped]
+from mistletoe.html_renderer import HTMLRenderer  # type: ignore[import-untyped]
+from mistletoe.span_token import AutoLink, Link  # type: ignore[import-untyped]
 
-
-import mistletoe  # type: ignore
-from mistletoe.span_token import AutoLink, Link  # type: ignore
-import mistletoe.block_token as BT  # type: ignore
-from mistletoe.html_renderer import HTMLRenderer  # type: ignore
-
+from promnesia.common import (
+    Extraction,
+    Loc,
+    PathIsh,
+    Res,
+    Url,
+    Visit,
+    file_mtime,
+    logger,
+)
 
 renderer = HTMLRenderer()
 
@@ -18,7 +28,7 @@ block_tokens = tuple(getattr(BT, name) for name in BT.__all__)
 
 class Parsed(NamedTuple):
     url: Url
-    context: Optional[str]
+    context: str | None
 
 
 Result = Res[Parsed]
@@ -118,7 +128,7 @@ class TextParser(Parser):
             self._html = HTML_MARKER + _ashtml(self.doc)
         return self._html
 
-    def _extract(self, cur, last_block=None) -> Iterator[Parsed]:
+    def _extract(self, cur, last_block=None) -> Iterator[Parsed]:  # noqa: ARG002
         if not isinstance(cur, (AutoLink, Link)):
             return
 

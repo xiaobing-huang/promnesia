@@ -1,23 +1,23 @@
 """
 Collects visits from Signal Desktop's encrypted SQLIite db(s).
 """
+from __future__ import annotations
 
 # Functions get their defaults from module-data.
 #
 # * Open-ciphered-db adapted from:
 #   https://github.com/carderne/signal-export/commit/2284c8f4
 # * Copyright (c) 2019 Chris Arderne, 2020 Kostis Anagnostopoulos
-
-
 import json
 import logging
 import platform
 import sqlite3
 import subprocess as sbp
+from collections.abc import Iterable, Iterator, Mapping
 from contextlib import contextmanager
 from pathlib import Path
 from textwrap import dedent, indent
-from typing import Any, Iterable, Iterator, Mapping, Union, Optional
+from typing import Any, Union
 
 from ..common import Loc, PathIsh, Results, Visit, extract_urls, from_epoch
 
@@ -29,7 +29,7 @@ def index(
     http_only: bool = False,
     locator_schema: str="editor",
     append_platform_path: bool = False,
-    override_key: Optional[str] = None,
+    override_key: str | None = None,
 ) -> Results:
     """
     :param db_paths:
@@ -109,10 +109,10 @@ messages_query = dedent(
             id,
             type,
             coalesce(
-                profileFullName, 
-                profileName, 
+                profileFullName,
+                profileName,
                 name,
-                profileFamilyName, 
+                profileFamilyName,
                 e164
             ) as aname,
             name,
@@ -171,7 +171,10 @@ def _expand_path(path_pattern: PathIsh) -> Iterable[Path]:
 
     Expansion code adapted from https://stackoverflow.com/a/51108375/548792
     to handle also degenerate cases (``'', '.', '/'``):
+    """
 
+    # NOTE: suppressing doctest from github actions
+    """
     >>> str(next(iter(_get_files('/'))))
     '/'
 
@@ -214,7 +217,10 @@ def collect_db_paths(*db_paths: PathIsh, append: bool = False) -> Iterable[Path]
         one or more pathish
 
     Note: needed `append` here, to resolve paths.
+    """
 
+    # NOTE: suppressing doctest from running on Github actions
+    """
     >>> bool(collect_db_paths())  # my home-path
     True
     >>> collect_db_paths(None)
@@ -237,11 +243,11 @@ def collect_db_paths(*db_paths: PathIsh, append: bool = False) -> Iterable[Path]
         platform_name = platform.system()
         try:
             plat_paths = platform_db_paths[platform_name]
-        except LookupError:
+        except LookupError as le:
             raise ValueError(
                 f"Unknown platform({platform_name}!"
                 f"\n  Expected one of {list(platform_db_paths.keys())}."
-            )
+            ) from le
 
         if db_paths and append:
             db_paths = [  # type: ignore[assignment]
@@ -261,7 +267,7 @@ def _config_for_dbfile(db_path: Path, default_key=None) -> Path:
 
 
 def _key_from_config(signal_desktop_config_path: PathIsh) -> str:
-    with open(signal_desktop_config_path, "r") as conf:
+    with Path(signal_desktop_config_path).open() as conf:
         return json.load(conf)["key"]
 
 
@@ -269,6 +275,7 @@ def _key_from_config(signal_desktop_config_path: PathIsh) -> str:
 def connect_db(
     db_path: Path,
     key,
+    *,
     decrypt_db: bool = False,
     sqlcipher_exe: PathIsh = "sqlcipher",
     **decryption_pragmas: Mapping[str, Any],
@@ -333,7 +340,7 @@ def connect_db(
                     check=True,
                     input=sql,
                     capture_output=True,
-                    universal_newlines=True,
+                    text=True,
                 )
             except sbp.CalledProcessError as ex:
                 prefix = " " * 4
@@ -357,7 +364,7 @@ def connect_db(
         yield db
     finally:
         try:
-            if db:
+            if db is not None:
                 db.close()
         finally:
             if decrypted_file and decrypted_file.exists():
@@ -380,7 +387,7 @@ def _handle_row(row: tuple, db_path: PathIsh, locator_schema: str) -> Results:
     if not urls:
         return
 
-    assert (
+    assert (  # noqa: PT018
         text and mid and sender and chatname
     ), f"should have eliminated messages without 'http' or missing ids: {row}"
 
@@ -400,7 +407,7 @@ def _harvest_db(
     db_path: Path,
     messages_query: str,
     *,
-    override_key: Optional[str] = None,
+    override_key: str | None = None,
     locator_schema: str = "editor",
     decrypt_db: bool = False,
     **decryption_pragmas,

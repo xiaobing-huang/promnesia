@@ -1,12 +1,16 @@
 from datetime import datetime, timezone
 
-from ..common import Visit, DbVisit, Loc, Source
-from ..extract import extract_visits
-
-from .common import get_testdata, unwrap, running_on_ci, gc_control
-
-from more_itertools import ilen
 import pytest
+from more_itertools import ilen
+
+from ..common import DbVisit, Loc, Source, Visit
+from ..extract import extract_visits
+from .common import (
+    gc_control,  # noqa: F401
+    get_testdata,
+    running_on_ci,
+    unwrap,
+)
 
 
 def test_with_error() -> None:
@@ -31,10 +35,12 @@ def test_urls_are_normalised() -> None:
     from ..sources import shellcmd
     from ..sources.plaintext import extract_from_path
 
-    visits = list(extract_visits(
-        source=Source(shellcmd.index, extract_from_path(get_testdata('normalise'))),
-        src='whatever',
-    ))
+    visits = list(
+        extract_visits(
+            source=Source(shellcmd.index, extract_from_path(get_testdata('normalise'))),
+            src='whatever',
+        )
+    )
     assert len(visits) == 7
 
     assert {unwrap(v).norm_url for v in visits} == {
@@ -55,6 +61,7 @@ def test_benchmark(count: int, gc_control) -> None:
         pytest.skip("test would be too slow on CI, only meant to run manually")
 
     from ..sources import demo
+
     source = Source(demo.index, count=count)
 
     total = ilen(extract_visits(source=source, src='whatever'))

@@ -1,9 +1,13 @@
-from ..common import Visit, logger, PathIsh, Url, Loc, Results
+from __future__ import annotations
+
+from promnesia.common import Loc, Results, Visit, logger
+
 
 # TODO make an iterator, insert in db as we go? handle errors gracefully?
 def index() -> Results:
-    from . import hpi
+    from . import hpi  # noqa: F401,I001
     from my.google.takeout.paths import get_takeouts
+
     takeouts = list(get_takeouts())
     # TODO if no takeouts, raise?
     # although could raise a warning on top level, when source emitted no takeouts
@@ -22,18 +26,16 @@ def index() -> Results:
 
 
 
-import pytz
-from itertools import chain
-from datetime import datetime
-from typing import List, Optional, Iterable, TYPE_CHECKING
-from pathlib import Path
 import json
+from collections.abc import Iterable
+from datetime import datetime
+from itertools import chain
+from pathlib import Path
 
-
-from .. import config
-
-
+import pytz
 from more_itertools import unique_everseen
+
+from promnesia import config
 
 try:
     from cachew import cachew
@@ -50,7 +52,9 @@ TakeoutPath = Path
 
 
 def _read_myactivity_html(takeout: TakeoutPath, kind: str) -> Iterable[Visit]:
+    # FIXME switch to actual kompress? and use CPath?
     from my.core.kompress import kexists
+
     # TODO glob
     # TODO not sure about windows path separators??
     spath = 'Takeout/My Activity/' + kind
@@ -61,7 +65,7 @@ def _read_myactivity_html(takeout: TakeoutPath, kind: str) -> Iterable[Visit]:
 
     locator = Loc.file(spath)
     from my.google.takeout.html import read_html
-    for dt, url, title in read_html(takeout, spath):
+    for dt, url, _title in read_html(takeout, spath):
         yield Visit(
             url=url,
             dt=dt,

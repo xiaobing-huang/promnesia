@@ -2,21 +2,27 @@
 Uses HPI [[https://github.com/karlicoss/HPI/blob/master/doc/MODULES.org#myreddit][reddit]] module
 '''
 
+from __future__ import annotations
+
+import typing
 from itertools import chain
-from typing import Set, Optional, Type
 
-from ..common import Visit, Loc, extract_urls, Results, logger
+from promnesia.common import Loc, Results, Visit, extract_urls, logger
+
+if typing.TYPE_CHECKING:
+    from my.reddit.common import Comment, RedditBase, Save, Submission, Upvote
 
 
-def index(*, render_markdown: bool = False, renderer: Optional[Type['RedditRenderer']] = None) -> Results:
-    from . import hpi
+def index(*, render_markdown: bool = False, renderer: type[RedditRenderer] | None = None) -> Results:
+    from . import hpi  # noqa: F401
+
     try:
-        from my.reddit.all import submissions, comments, saved, upvoted
+        from my.reddit.all import comments, saved, submissions, upvoted
     except ModuleNotFoundError as e:
         if "No module named 'my.reddit.all'" in str(e):
             import warnings
             warnings.warn("DEPRECATED/reddit: Using an old version of HPI, please update")
-            from my.reddit import submissions, comments, saved, upvoted
+            from my.reddit import comments, saved, submissions, upvoted
         else:
             raise e
 
@@ -58,7 +64,7 @@ def index(*, render_markdown: bool = False, renderer: Optional[Type['RedditRende
 # mostly here so we can keep track of how the user
 # wants to render markdown
 class RedditRenderer:
-    def __init__(self, render_markdown: bool = False) -> None:
+    def __init__(self, *, render_markdown: bool = False) -> None:
         self._link_extractor = None
         self._parser_cls = None
         try:
@@ -77,7 +83,7 @@ class RedditRenderer:
         self.render_markdown = render_markdown
 
 
-    def _from_comment(self, i: 'Comment') -> Results:
+    def _from_comment(self, i: Comment) -> Results:
         locator = Loc.make(
             title='Reddit comment',
             href=i.url,
@@ -85,7 +91,7 @@ class RedditRenderer:
         yield from self._from_common(i, locator=locator)
 
 
-    def _from_submission(self, i: 'Submission') -> Results:
+    def _from_submission(self, i: Submission) -> Results:
         locator = Loc.make(
             title=f'Reddit submission: {i.title}',
             href=i.url,
@@ -93,7 +99,7 @@ class RedditRenderer:
         yield from self._from_common(i, locator=locator)
 
 
-    def _from_upvote(self, i: 'Upvote') -> Results:
+    def _from_upvote(self, i: Upvote) -> Results:
         locator = Loc.make(
             title='Reddit upvote',
             href=i.url,
@@ -101,7 +107,7 @@ class RedditRenderer:
         yield from self._from_common(i, locator=locator)
 
 
-    def _from_save(self, i: 'Save') -> Results:
+    def _from_save(self, i: Save) -> Results:
         locator = Loc.make(
             title='Reddit save',
             href=i.url,
@@ -117,7 +123,7 @@ class RedditRenderer:
             return text
 
 
-    def _from_common(self, i: 'RedditBase', locator: Loc) -> Results:
+    def _from_common(self, i: RedditBase, locator: Loc) -> Results:
         urls = [i.url]
         # TODO this should belong to HPI.. fix permalink handling I guess
         # ok, it's not present for all of them..
@@ -130,7 +136,7 @@ class RedditRenderer:
 
         context = self._render_body(i.text)
 
-        emitted: Set[str] = set()
+        emitted: set[str] = set()
 
         for url in chain(urls, extract_urls(i.text)):
             if url in emitted:
@@ -164,9 +170,4 @@ class RedditRenderer:
                     locator=locator,
                 )
                 emitted.add(res.url)
-
-
-import typing
-if typing.TYPE_CHECKING:
-    from my.reddit.common import Submission, Comment, Save, Upvote, RedditBase
 

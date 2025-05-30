@@ -2,23 +2,33 @@
 Uses [[https://github.com/fabianonline/telegram_backup#readme][telegram_backup]] database for messages data
 '''
 
-from pathlib import Path
-import sqlite3
-from textwrap import dedent
-from typing import Union, TypeVar
-from urllib.parse import unquote # TODO mm, make it easier to rememember to use...
+from __future__ import annotations
 
-from ..common import PathIsh, Visit, get_logger, Loc, extract_urls, from_epoch, Results, echain
+import sqlite3
+from pathlib import Path
+from textwrap import dedent
+from typing import TypeVar
+from urllib.parse import unquote  # TODO mm, make it easier to rememember to use...
+
+from promnesia.common import (
+    Loc,
+    PathIsh,
+    Results,
+    Visit,
+    echain,
+    extract_urls,
+    from_epoch,
+)
+
 from ..sqlite import sqlite_connection
 
 T = TypeVar("T")
 
 
-def unwrap(res: Union[T, Exception]) -> T:
+def unwrap(res: T | Exception) -> T:
     if isinstance(res, Exception):
         raise res
-    else:
-        return res
+    return res
 
 
 def index(database: PathIsh, *, http_only: bool=False) -> Results:
@@ -28,8 +38,6 @@ def index(database: PathIsh, *, http_only: bool=False) -> Results:
     :param http_only:
         when true, do not collect IP-addresses and `python.py` strings
     """
-    logger = get_logger()
-
     path = Path(database)
     assert path.is_file(), path
 

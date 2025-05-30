@@ -1,26 +1,28 @@
 from __future__ import annotations
 
-from contextlib import contextmanager
-from datetime import datetime, date
-from functools import lru_cache
-from glob import glob
 import itertools
 import logging
 import os
-from pathlib import Path
+import re
 import shutil
-from subprocess import run, PIPE, Popen
+import tempfile
+import warnings
+from collections.abc import Iterable, Sequence
+from contextlib import contextmanager
+from copy import copy
+from datetime import date, datetime
+from functools import lru_cache
+from glob import glob
+from pathlib import Path
+from subprocess import PIPE, Popen, run
 from timeit import default_timer as timer
 from types import ModuleType
-from typing import NamedTuple, Iterable, TypeVar, Callable, List, Optional, Union, TypeVar
-import warnings
+from typing import TYPE_CHECKING, Callable, NamedTuple, Optional, TypeVar, Union
 
-from more_itertools import intersperse
 import pytz
+from more_itertools import intersperse
 
 from .cannon import canonify
-from .compat import removeprefix
-
 
 _is_windows = os.name == 'nt'
 
@@ -38,14 +40,14 @@ Second = int
 # TODO hmm. arguably, source and context are almost same things...
 class Loc(NamedTuple):
     title: str
-    href: Optional[str]=None
+    href: Optional[str] = None  # noqa: UP007  # looks like hypothesis doesn't like in on python <= 3.9
 
     @classmethod
-    def make(cls, title: str, href: Optional[str]=None) -> 'Loc':
+    def make(cls, title: str, href: str | None=None) -> Loc:
         return cls(title=title, href=href)
 
     @classmethod
-    def file(cls, path: PathIsh, line: Optional[int]=None, relative_to: Optional[Path]=None) -> 'Loc':
+    def file(cls, path: PathIsh, line: int | None=None, relative_to: Path | None=None) -> Loc:
         lstr = '' if line is None else f':{line}'
         # todo loc should be url encoded? dunno.
         # or use line=? eh. I don't know. Just ask in issues.
@@ -65,7 +67,7 @@ class Loc(NamedTuple):
             try:
                 # making it relative is a bit nicer for display
                 rel = rel.relative_to(relative_to)
-            except Exception as e:
+            except Exception:
                 pass # todo log/warn?
         loc = f'{rel}{lstr}'
         return cls.make(
@@ -94,7 +96,7 @@ def _warn_no_xdg_mime() -> None:
 def _detect_mime_handler() -> str:
     def exists(what: str) -> bool:
         try:
-            r = run(f'xdg-mime query default x-scheme-handler/{what}'.split(), stdout=PIPE)
+            r = run(f'xdg-mime query default x-scheme-handler/{what}'.split(), stdout=PIPE, check=False)
         except (FileNotFoundError, NotADirectoryError):  # ugh seems that osx might throw NotADirectory for some reason
             _warn_no_xdg_mime()
             return False
@@ -139,12 +141,12 @@ class Visit(NamedTuple):
     # TODO back to DatetimeIsh, but somehow make compatible to dbcache?
     dt: datetime
     locator: Loc
-    context: Optional[Context] = None
-    duration: Optional[Second] = None
+    context: Context | None = None
+    duration: Second | None = None
     # TODO shit. I need to insert it in chrome db....
     # TODO gonna be hard to fill retroactively.
     # spent: Optional[Second] = None
-    debug: Optional[str] = None
+    debug: str | None = None
 
 Result = Union[Visit, Exception]
 Results = Iterable[Result]
@@ -157,12 +159,12 @@ class DbVisit(NamedTuple):
     orig_url: Url
     dt: datetime
     locator: Loc
-    src: Optional[SourceName] = None
-    context: Optional[Context] = None
-    duration: Optional[Second] = None
+    src: Optional[SourceName] = None  # noqa: UP007  # looks like hypothesis doesn't like in on python <= 3.9
+    context: Optional[Context] = None  # noqa: UP007  # looks like hypothesis doesn't like in on python <= 3.9
+    duration: Optional[Second] = None  # noqa: UP007  # looks like hypothesis doesn't like in on python <= 3.9
 
     @staticmethod
-    def make(p: Visit, src: SourceName) -> Res['DbVisit']:
+    def make(p: Visit, src: SourceName) -> Res[DbVisit]:
         try:
             # hmm, mypy gets a bit confused here.. presumably because datetime is always datetime (but date is not datetime)
             if isinstance(p.dt, datetime):
@@ -171,7 +173,7 @@ class DbVisit(NamedTuple):
                 # TODO that won't be with timezone..
                 dt = datetime.combine(p.dt, datetime.min.time()) # meh..
             else:
-                raise AssertionError(f'unexpected date: {p.dt}, {type(p.dt)}')
+                raise AssertionError(f'unexpected date: {p.dt}, {type(p.dt)}')  # noqa: TRY301
         except Exception as e:
             return e
 
@@ -196,6 +198,7 @@ Filter = Callable[[Url], bool]
 
 
 from .logging import LazyLogger
+
 logger = LazyLogger('promnesia', level='DEBUG')
 
 def get_logger() -> logging.Logger:
@@ -204,7 +207,6 @@ def get_logger() -> logging.Logger:
 
 
 
-import tempfile
 # kinda singleton
 @lru_cache(1)
 def get_tmpdir() -> tempfile.TemporaryDirectory[str]:
@@ -218,7 +220,7 @@ Syntax = str
 
 @lru_cache(None)
 def _get_urlextractor(syntax: Syntax):
-    from urlextract import URLExtract # type: ignore
+    from urlextract import URLExtract  # type: ignore[import-untyped]
     u = URLExtract()
     # https://github.com/lipoja/URLExtract/issues/13
     if syntax in {'org', 'orgmode', 'org-mode'}: # TODO remove hardcoding..
@@ -249,7 +251,7 @@ def iter_urls(s: str, *, syntax: Syntax='') -> Iterable[Url]:
         yield _sanitize(u)
 
 
-def extract_urls(s: str, *, syntax: Syntax='') -> List[Url]:
+def extract_urls(s: str, *, syntax: Syntax='') -> list[Url]:
     return list(iter_urls(s=s, syntax=syntax))
 
 
@@ -274,7 +276,7 @@ class PathWithMtime(NamedTuple):
     mtime: float
 
     @classmethod
-    def make(cls, p: Path) -> 'PathWithMtime':
+    def make(cls, p: Path) -> PathWithMtime:
         return cls(
             path=p,
             mtime=p.stat().st_mtime,
@@ -300,7 +302,7 @@ def _guess_name(thing: PreSource) -> str:
         guess = thing.__module__
 
     dflt = 'promnesia.sources.'
-    guess = removeprefix(guess, prefix=dflt)
+    guess = guess.removeprefix(dflt)
     if guess == 'config':
         # this happens when we define a lambda in config or something without properly wrapping in Source
         logger.warning(f'Inferred source name "config" for {thing}. This might be misleading TODO')
@@ -362,13 +364,14 @@ Indexer = Source
 # NOTE: used in configs...
 def last(path: PathIsh, *parts: str) -> Path:
     import os.path
-    pp = os.path.join(str(path), *parts)
-    return Path(max(glob(pp, recursive=True)))
+    pp = os.path.join(str(path), *parts)  # noqa: PTH118
+    return Path(max(glob(pp, recursive=True)))  # noqa: PTH207
 
 
-from .logging import setup_logger
+from .logging import setup_logger  # noqa: F401
 
-from copy import copy
+
+# TODO get rid of this? not sure if still necessary
 def echain(ex: Exception, cause: Exception) -> Exception:
     e = copy(ex)
     e.__cause__ = cause
@@ -382,7 +385,6 @@ def echain(ex: Exception, cause: Exception) -> Exception:
 
 def slugify(x: str) -> str:
     # https://stackoverflow.com/a/38766141/706389
-    import re
     valid_file_name = re.sub(r'[^\w_.)( -]', '', x)
     return valid_file_name
 
@@ -392,7 +394,7 @@ def appdirs():
     under_test = os.environ.get('PYTEST_CURRENT_TEST') is not None
     # todo actually use test name?
     name = 'promnesia-test' if under_test else 'promnesia'
-    import appdirs as ad # type: ignore[import-untyped]
+    import appdirs as ad  # type: ignore[import-untyped]
     return ad.AppDirs(appname=name)
 
 
@@ -409,13 +411,13 @@ def default_cache_dir() -> Path:
 # make it lazy, otherwise it might crash on module import (e.g. on Windows)
 # ideally would be nice to fix it properly https://github.com/ahupp/python-magic#windows
 @lru_cache(1)
-def _magic() -> Callable[[PathIsh], Optional[str]]:
+def _magic() -> Callable[[PathIsh], str | None]:
     logger = get_logger()
     try:
-        import magic # type: ignore
+        import magic  # type: ignore[import-not-found]
     except Exception as e:
         logger.exception(e)
-        defensive_msg: Optional[str] = None
+        defensive_msg: str | None = None
         if isinstance(e, ModuleNotFoundError) and e.name == 'magic':
             defensive_msg = "python-magic is not detected. It's recommended for better file type detection (pip3 install --user python-magic). See https://github.com/ahupp/python-magic#installation"
         elif isinstance(e, ImportError):
@@ -425,7 +427,7 @@ def _magic() -> Callable[[PathIsh], Optional[str]]:
         if defensive_msg is not None:
             logger.warning(defensive_msg)
             warnings.warn(defensive_msg)
-            return lambda path: None # stub
+            return lambda path: None  # stub  # noqa: ARG005
         else:
             raise e
     else:
@@ -441,7 +443,7 @@ def _mimetypes():
     return mimetypes
 
 
-def mime(path: PathIsh) -> Optional[str]:
+def mime(path: PathIsh) -> str | None:
     ps = str(path)
     mimetypes = _mimetypes()
     # first try mimetypes, it's only using the filename without opening the file
@@ -453,7 +455,7 @@ def mime(path: PathIsh) -> Optional[str]:
     return magic(ps)
 
 
-def find_args(root: Path, follow: bool, ignore: List[str]=[]) -> List[str]:
+def find_args(root: Path, *, follow: bool, ignore: Sequence[str] = ()) -> list[str]:
     prune_dir_args = []
     ignore_file_args = []
     if ignore:
@@ -476,7 +478,7 @@ def find_args(root: Path, follow: bool, ignore: List[str]=[]) -> List[str]:
     ]
 
 
-def fdfind_args(root: Path, follow: bool, ignore: List[str]=[]) -> List[str]:
+def fdfind_args(root: Path, *, follow: bool, ignore: Sequence[str] = ()) -> list[str]:
     from .config import extra_fd_args
 
     ignore_args = []
@@ -496,7 +498,7 @@ def fdfind_args(root: Path, follow: bool, ignore: List[str]=[]) -> List[str]:
     ]
 
 
-def traverse(root: Path, *, follow: bool=True, ignore: List[str]=[]) -> Iterable[Path]:
+def traverse(root: Path, *, follow: bool=True, ignore: Sequence[str] = ()) -> Iterable[Path]:
     if not root.is_dir():
         yield root
         return
@@ -605,3 +607,8 @@ def is_sqlite_db(x: Path) -> bool:
         'application/vnd.sqlite3',
         # TODO this mime can also match wal files/journals, not sure
     }
+
+
+if not TYPE_CHECKING:
+    # todo deprecate properly --just backwards compat
+    from .compat import removeprefix  # noqa: F401

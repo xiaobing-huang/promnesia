@@ -9,16 +9,17 @@ are same content, but you can't tell that by URL equality. Even canonical urls a
 
 Also some experiments to establish 'URL hierarchy'.
 """
-# TODO eh?? they fixed mobile.twitter.com?
+from __future__ import annotations
 
-from itertools import chain
 import re
 import typing
-from typing import Iterable, NamedTuple, Set, Optional, List, Sequence, Union, Tuple, Dict, Any, Collection
-
 import urllib.parse
-from urllib.parse import urlsplit, parse_qsl, urlunsplit, parse_qs, urlencode, SplitResult
+from collections.abc import Collection, Iterable, Sequence
 
+# TODO eh?? they fixed mobile.twitter.com?
+from itertools import chain
+from typing import Any, NamedTuple, Union
+from urllib.parse import SplitResult, parse_qsl, urlencode, urlsplit, urlunsplit
 
 # this has some benchmark, but quite a few librarires seem unmaintained, sadly
 # I guess i'll stick to default for now, until it's a critical bottleneck
@@ -108,11 +109,11 @@ default_qkeep = [
 
 # TODO perhaps, decide if fragment is meaningful (e.g. wiki) or random sequence of letters?
 class Spec(NamedTuple):
-    qkeep  : Optional[Union[Collection[str], bool]] = None
-    qremove: Optional[Set[str]] = None
+    qkeep  : Collection[str] | bool | None = None
+    qremove: set[str] | None = None
     fkeep  : bool = False
 
-    def keep_query(self, q: str) -> Optional[int]: # returns order
+    def keep_query(self, q: str) -> int | None: # returns order
         if self.qkeep is True:
             return 1
         qkeep = {
@@ -121,8 +122,6 @@ class Spec(NamedTuple):
         qremove = default_qremove.union(self.qremove or {})
         # I suppose 'remove' is only useful for logging. we remove by default anyway
 
-        keep = False
-        remove = False
         qk = qkeep.get(q)
         if qk is not None:
             return qk
@@ -134,13 +133,13 @@ class Spec(NamedTuple):
         return None
 
     @classmethod
-    def make(cls, **kwargs) -> 'Spec':
+    def make(cls, **kwargs) -> Spec:
         return cls(**kwargs)
 
 S = Spec
 
 # TODO perhaps these can be machine learnt from large set of urls?
-specs: Dict[str, Spec] = {
+specs: dict[str, Spec] = {
     'youtube.com': S(
         # TODO search_query?
         qkeep=[ # note: experimental.. order matters here
@@ -178,7 +177,6 @@ specs: Dict[str, Spec] = {
 
             'source', 'tsid', 'refsrc', 'pnref', 'rc', '_rdr', 'src', 'hc_location', 'section', 'permPage', 'soft', 'pn_ref', 'action',
             'ti', 'aref', 'event_time_id', 'action_history', 'filter', 'ref_notif_type', 'has_source', 'source_newsfeed_story_type',
-            'ref_notif_type',
         },
     ),
     'physicstravelguide.com': S(fkeep=True), # TODO instead, pass fkeep marker object for shorter spec?
@@ -218,10 +216,10 @@ Spec2 = Any # TODO
 
 # TODO this should be a map
 Frag = Any
-Parts = Sequence[Tuple[str, str]]
+Parts = Sequence[tuple[str, str]]
 
 
-def _yc(domain: str, path: str, qq: Parts, frag: Frag) -> Tuple[Any, Any, Parts, Frag]:
+def _yc(domain: str, path: str, qq: Parts, frag: Frag) -> tuple[Any, Any, Parts, Frag]:
     if path[:5] == '/from':
         site = dict(qq).get('site')
         if site is not None:
@@ -232,7 +230,7 @@ def _yc(domain: str, path: str, qq: Parts, frag: Frag) -> Tuple[Any, Any, Parts,
     # TODO this should be in-place? for brevity?
     return (domain, path, qq, frag)
 
-def get_spec2(dom: str) -> Optional[Spec2]:
+def get_spec2(dom: str) -> Spec2 | None:
     return {
         'news.ycombinator.com': _yc,
     }.get(dom)
@@ -273,6 +271,9 @@ def _prenormalise(url: str) -> str:
     return url
 
 
+Left = Union[str, Sequence[str]]
+Right = tuple[str, str, str]
+
 def transform_split(split: SplitResult):
     netloc = canonify_domain(split.netloc)
 
@@ -282,13 +283,11 @@ def transform_split(split: SplitResult):
     fragment = split.fragment
 
     ID   = r'(?P<id>[^/]+)'
-    REST = r'(?P<rest>.*)'
+    # REST = r'(?P<rest>.*)'
 
-    Left = Union[str, Sequence[str]]
-    Right = Tuple[str, str, str]
     # the idea is that we can unify certain URLs here and map them to the 'canonical' one
     # this is a dict only for grouping but should be a list really.. todo
-    rules: Dict[Left, Right] = {
+    rules: dict[Left, Right] = {
         # TODO m. handling might be quite common
         # f'm.youtube.com/{REST}': ('youtube.com', '{rest}'),
         (
@@ -322,9 +321,9 @@ def transform_split(split: SplitResult):
             continue
         gd = m.groupdict()
         if len(to) == 2:
-            to = to + ('', )
+            to = (*to, '')
 
-        (netloc, path, qq) = [t.format(**gd) for t in to]
+        (netloc, path, qq) = (t.format(**gd) for t in to)
         qparts.extend(parse_qsl(qq, keep_blank_values=True)) # TODO hacky..
         # TODO eh, qparts should really be a map or something...
         break
@@ -361,7 +360,7 @@ def myunsplit(domain: str, path: str, query: str, fragment: str) -> str:
 #     ]
 #     for re in regexes:
 
-def handle_archive_org(url: str) -> Optional[str]:
+def handle_archive_org(url: str) -> str | None:
     are = r'web.archive.org/web/(?P<timestamp>\d+)/(?P<rest>.*)'
     m = re.fullmatch(are, url)
     if m is None:
@@ -697,8 +696,8 @@ def groups(it, args): # pragma: no cover
     all_pats = get_patterns()
 
     from collections import Counter
-    c: typing.Counter[Optional[str]] = Counter()
-    unmatched: List[str] = []
+    c: typing.Counter[str | None] = Counter()
+    unmatched: list[str] = []
 
     def dump():
         print(c)
@@ -756,9 +755,9 @@ def groups(it, args): # pragma: no cover
 def display(it, args) -> None: # pragma: no cover
     # TODO better name?
     import difflib
-    # pylint: disable=import-error
-    from termcolor import colored as C # type: ignore
     from sys import stdout
+
+    from termcolor import colored as C  # type: ignore[import-not-found]
 
     for line in it:
         line = line.strip()

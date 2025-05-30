@@ -1,15 +1,14 @@
+from __future__ import annotations
+
 from contextlib import contextmanager
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import Union, List
+
+import pytest
+from more_itertools import ilen
 
 from ..common import Source
-from ..config import import_config, Config
-
-
-from more_itertools import ilen
-import pytest
-
+from ..config import Config, import_config
 from .common import throw
 
 
@@ -22,7 +21,7 @@ def make(body: str) -> Config:
 
 
 @contextmanager
-def with_config(cfg: Union[str, Config]):
+def with_config(cfg: str | Config):
     from .. import config as C
 
     assert not C.has()
@@ -35,7 +34,7 @@ def with_config(cfg: Union[str, Config]):
         C.reset()
 
 
-def index(cfg: Union[str, Config], check=True) -> List[Exception]:
+def index(cfg: str | Config, *, check: bool = True) -> list[Exception]:
     from ..__main__ import _do_index
 
     with with_config(cfg):

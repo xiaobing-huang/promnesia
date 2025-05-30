@@ -1,15 +1,18 @@
+from __future__ import annotations
+
+import sys
+import time
+from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-import sys
-import time
-from typing import Any, Dict, Iterator, Optional
+from typing import Any
 
 import psutil
 import requests
 
 from ..common import PathIsh
-from .common import tmp_popen, promnesia_bin, free_port
+from .common import free_port, promnesia_bin, tmp_popen
 
 
 @dataclass
@@ -18,18 +21,18 @@ class Helper:
     port: str
     process: psutil.Popen
 
-    def get(self, path: str, *args):
+    def get(self, path: str):
         # check it's alive first so the error is cleaner
         assert self.process.poll() is None, self.process
         return requests.get(f'http://{self.host}:{self.port}' + path)
 
-    def post(self, path: str, *, json: Optional[Dict[str, Any]] = None):
+    def post(self, path: str, *, json: dict[str, Any] | None = None):
         assert self.process.poll() is None, self.process
         return requests.post(f'http://{self.host}:{self.port}' + path, json=json)
 
 
 @contextmanager
-def run_server(db: Optional[PathIsh] = None, *, timezone: Optional[str] = None) -> Iterator[Helper]:
+def run_server(db: PathIsh | None = None, *, timezone: str | None = None) -> Iterator[Helper]:
     # TODO not sure, perhaps best to use a thread or something?
     # but for some tests makes more sense to test in a separate process
     with free_port() as pp:
@@ -56,7 +59,7 @@ def run_server(db: Optional[PathIsh] = None, *, timezone: Optional[str] = None) 
                     time.sleep(0.1)
             else:
                 raise RuntimeError("Cooldn't connect to '{st}' after 50 attempts")
-            print("Started server up, db: {db}".format(db=db), file=sys.stderr)
+            print(f"Started server up, db: {db}", file=sys.stderr)
 
             yield server
 

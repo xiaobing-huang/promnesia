@@ -1,16 +1,19 @@
-from contextlib import closing, contextmanager
+from __future__ import annotations
+
 import gc
 import inspect
 import os
-from pathlib import Path
 import socket
 import sys
+from collections.abc import Iterator
+from contextlib import closing, contextmanager
+from pathlib import Path
 from textwrap import dedent
-from typing import Iterator, NoReturn, TypeVar
+from typing import NoReturn, TypeVar
 
 import pytest
 
-from ..common import _is_windows, Res
+from ..common import Res, _is_windows
 
 
 def under_ci() -> bool:
@@ -25,7 +28,7 @@ def throw(x: Exception) -> NoReturn:
 
 
 @pytest.fixture
-def gc_control(gc_on: bool):
+def gc_control(*, gc_on: bool):
     if gc_on:
         # no need to do anything, should be on by default
         yield
@@ -56,6 +59,7 @@ def get_testdata(path: str) -> Path:
 @contextmanager
 def tmp_popen(*args, **kwargs):
     import psutil
+
     with psutil.Popen(*args, **kwargs) as p:
         try:
             yield p
@@ -95,6 +99,7 @@ def reset_filters():
 
 # TODO could be a TypeGuard from 3.10
 V = TypeVar('V')
+
 
 def unwrap(r: Res[V]) -> V:
     assert not isinstance(r, Exception), r

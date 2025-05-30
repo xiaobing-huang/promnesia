@@ -1,19 +1,19 @@
+from __future__ import annotations
+
 from pathlib import Path
-from typing import Tuple, List
 
 from sqlalchemy import (
+    Engine,
+    Index,
+    MetaData,
+    Table,
     create_engine,
     exc,
-    Engine,
-    MetaData,
-    Index,
-    Table,
 )
 
 from .common import DbVisit, get_columns, row_to_db_visit
 
-
-DbStuff = Tuple[Engine, Table]
+DbStuff = tuple[Engine, Table]
 
 
 def get_db_stuff(db_path: Path) -> DbStuff:
@@ -39,7 +39,7 @@ def get_db_stuff(db_path: Path) -> DbStuff:
     return engine, table
 
 
-def get_all_db_visits(db_path: Path) -> List[DbVisit]:
+def get_all_db_visits(db_path: Path) -> list[DbVisit]:
     # NOTE: this is pretty inefficient if the DB is huge
     # mostly intended for tests
     engine, table = get_db_stuff(db_path)

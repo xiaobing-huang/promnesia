@@ -1,11 +1,14 @@
 '''
 Uses HPI [[https://github.com/karlicoss/HPI/blob/master/doc/MODULES.org#mygoogletakeoutpaths][google.takeout]] module
 '''
-from typing import Iterable, Set, Any, NamedTuple
-import warnings
 
-from ..common import Visit, Loc, Results, logger
-from ..compat import removeprefix
+from __future__ import annotations
+
+import warnings
+from collections.abc import Iterable
+from typing import Any, NamedTuple
+
+from promnesia.common import Loc, Results, Visit, logger
 
 
 # incase user is using an old version of google_takeout_parser
@@ -14,13 +17,20 @@ class YoutubeCSVStub(NamedTuple):
 
 
 def index() -> Results:
-    from . import hpi
-    import json
+    from . import hpi  # noqa: F401
 
     try:
+        from google_takeout_parser.models import (
+            Activity,
+            ChromeHistory,
+            LikedYoutubeVideo,
+            YoutubeComment,
+        )
+        from google_takeout_parser.parse_csv import (
+            extract_comment_links,
+            reconstruct_comment_content,
+        )
         from my.google.takeout.parser import events
-        from google_takeout_parser.models import Activity, YoutubeComment, LikedYoutubeVideo, ChromeHistory
-        from google_takeout_parser.parse_csv import reconstruct_comment_content, extract_comment_links
     except ModuleNotFoundError as ex:
         logger.exception(ex)
         yield ex
@@ -32,7 +42,7 @@ def index() -> Results:
         return
 
 
-    _seen: Set[str] = {
+    _seen: set[str] = {
         # these are definitely not useful for promnesia
         'Location',
         'PlaceVisit',
@@ -54,7 +64,7 @@ def index() -> Results:
         if et_name in _seen:
             return
         _seen.add(et_name)
-        yield RuntimeError(f"Unhandled event {repr(type(e))}: {e}")
+        yield RuntimeError(f"Unhandled event {type(e)!r}: {e}")
 
     for e in events():
         if isinstance(e, Exception):
@@ -67,13 +77,13 @@ def index() -> Results:
                 # when you follow something from search the actual url goes after this
                 # e.g. https://www.google.com/url?q=https://en.wikipedia.org/wiki/Clapham
                 # note: also title usually starts with 'Visited ', in such case but perhaps fine to keep it
-                url = removeprefix(url, "https://www.google.com/url?q=")
+                url = url.removeprefix("https://www.google.com/url?q=")
                 title = e.title
 
                 if e.header == 'Chrome':
                     # title contains 'Visited <page title>' in this case
                     context = None
-                    title = removeprefix(title, 'Visited ')
+                    title = title.removeprefix('Visited ')
                 elif e.header in _CLEAR_CONTEXT_FOR_HEADERS:
                     # todo perhaps could add to some sort of metadata?
                     # only useful for debugging really
@@ -131,7 +141,7 @@ def index() -> Results:
                     url=url, dt=e.dt, context=e.content, locator=Loc(title=e.content, href=url)
                 )
         elif imported_yt_csv_models and isinstance(e, CSVYoutubeComment):
-            contentJSON = json.loads(e.contentJSON)
+            contentJSON = e.contentJSON
             content = reconstruct_comment_content(contentJSON, format='text')
             if isinstance(content, Exception):
                 yield content
@@ -149,7 +159,7 @@ def index() -> Results:
                 url=e.video_url, dt=e.dt, context=content, locator=Loc(title=context, href=e.video_url)
             )
         elif imported_yt_csv_models and isinstance(e, CSVYoutubeLiveChat):
-            contentJSON = json.loads(e.contentJSON)
+            contentJSON = e.contentJSON
             content = reconstruct_comment_content(contentJSON, format='text')
             if isinstance(content, Exception):
                 yield content

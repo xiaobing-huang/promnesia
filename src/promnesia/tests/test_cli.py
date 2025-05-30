@@ -1,13 +1,11 @@
 import os
 import time
 
-from ..common import _is_windows
-
-from .common import get_testdata, promnesia_bin, tmp_popen
-
 import pytest
 import requests
 
+from ..common import _is_windows
+from .common import get_testdata, promnesia_bin, tmp_popen
 
 ox_hugo_data = get_testdata('ox-hugo/test/site')
 
@@ -22,12 +20,12 @@ def test_demo() -> None:
         # TODO why does it want post??
         time.sleep(2)  # meh.. need a generic helper to wait till ready...
         res = {}
-        for attempt in range(30):
+        for _attempt in range(30):
             time.sleep(1)
             try:
                 res = requests.post(
                     "http://localhost:16789/search",
-                    json=dict(url="https://github.com/kaushalmodi/ox-hugo/issues"),
+                    json={'url': "https://github.com/kaushalmodi/ox-hugo/issues"},
                 ).json()
                 break
             except:

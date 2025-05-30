@@ -4,29 +4,28 @@ from concurrent.futures import ProcessPoolExecutor
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import Any, Iterable
+from typing import Any
 
-
-from hypothesis import settings, given
-from hypothesis.strategies import from_type
 # NOTE: pytest ... -s --hypothesis-verbosity=debug is useful for seeing what hypothesis is doing
 import pytest
 import pytz
-
+from hypothesis import given, settings
+from hypothesis.strategies import from_type
 
 from ..common import Loc
 from ..database.common import DbVisit
 from ..database.dump import visits_to_sqlite
 from ..database.load import get_all_db_visits
 from ..sqlite import sqlite_connection
-
-from .common import gc_control, running_on_ci
-
-
-HSETTINGS: dict[str, Any] = dict(
-    derandomize=True,
-    deadline=timedelta(seconds=2),  # sometimes slow on ci
+from .common import (
+    gc_control,  # noqa: F401
+    running_on_ci,
 )
+
+HSETTINGS: dict[str, Any] = {
+    'derandomize': True,
+    'deadline': timedelta(seconds=2),  # sometimes slow on ci
+}
 
 
 def test_no_visits(tmp_path: Path) -> None:
@@ -158,6 +157,7 @@ def test_random_visit(visit: DbVisit) -> None:
 
 _dt_naive = datetime.fromisoformat('2023-11-14T23:11:01')
 _dt_aware = pytz.timezone('America/New_York').localize(_dt_naive)
+
 
 def make_testvisit(i: int) -> DbVisit:
     return DbVisit(

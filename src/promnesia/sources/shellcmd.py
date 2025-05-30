@@ -2,18 +2,30 @@
 Greps out URLs from an arbitrary shell command results.
 """
 
-from datetime import datetime
+from __future__ import annotations
+
 import os
 import re
-from subprocess import run, PIPE
-from typing import Union, Sequence
 import warnings
+from collections.abc import Sequence
+from datetime import datetime
+from subprocess import PIPE, run
 
-from ..common import Visit, Loc, Results, extract_urls, file_mtime, get_system_tz, now_tz, _is_windows, PathIsh
+from promnesia.common import (
+    Loc,
+    PathIsh,
+    Results,
+    Visit,
+    _is_windows,
+    extract_urls,
+    file_mtime,
+    now_tz,
+)
+
 from .plaintext import _has_grep
 
 
-def index(command: Union[str, Sequence[PathIsh]]) -> Results:
+def index(command: str | Sequence[PathIsh]) -> Results:
     cmd: Sequence[PathIsh]
     cmds: str
     if isinstance(command, str):
@@ -23,8 +35,6 @@ def index(command: Union[str, Sequence[PathIsh]]) -> Results:
     else:
         cmds = ' '.join(map(str, command))
         cmd = command
-
-    tz = get_system_tz()
 
     # ugh... on windows grep does something nasty? e.g:
     # grep --color=never -r -H -n -I -E http 'D:\\a\\promnesia\\promnesia\\tests\\testdata\\custom'
@@ -71,7 +81,7 @@ def index(command: Union[str, Sequence[PathIsh]]) -> Results:
                 context=context,
             )
 
-    r = run(cmd, stdout=PIPE)
+    r = run(cmd, stdout=PIPE, check=False)
     if r.returncode > 0:
         if not (cmd[0] in {'grep', 'findstr'} and r.returncode == 1): # ugh. grep returns 1 on no matches...
             r.check_returncode()

@@ -1,19 +1,17 @@
-from pathlib import Path
-import os
-from types import ModuleType
-from typing import List, Optional, Union, NamedTuple, Iterable, Callable
+from __future__ import annotations
+
 import importlib
 import importlib.util
+import os
 import warnings
+from collections.abc import Iterable
+from pathlib import Path
+from types import ModuleType
+from typing import Callable, NamedTuple, Union
 
-from .common import PathIsh, default_output_dir, default_cache_dir
-from .common import Res, Source, DbVisit
-
+from .common import DbVisit, PathIsh, Res, Source, default_cache_dir, default_output_dir
 
 HookT = Callable[[Res[DbVisit]], Iterable[Res[DbVisit]]]
-
-
-from typing import Any
 
 
 ModuleName = str
@@ -24,25 +22,23 @@ ConfigSource = Union[Source, ModuleName, ModuleType]
 
 class Config(NamedTuple):
     # TODO remove default from sources once migrated
-    SOURCES: List[ConfigSource] = []
+    SOURCES: list[ConfigSource] = []
 
     # if not specified, uses user data dir
-    OUTPUT_DIR: Optional[PathIsh] = None
+    OUTPUT_DIR: PathIsh | None = None
 
-    CACHE_DIR: Optional[PathIsh] = ''
-    FILTERS: List[str] = []
+    CACHE_DIR: PathIsh | None = ''
+    FILTERS: list[str] = []
 
-    HOOK: Optional[HookT] = None
+    HOOK: HookT | None = None
 
     #
     # NOTE: INDEXERS is deprecated, use SOURCES instead
-    INDEXERS: List[ConfigSource] = []
+    INDEXERS: list[ConfigSource] = []
     #MIME_HANDLER: Optional[str] = None # TODO
 
     @property
     def sources(self) -> Iterable[Res[Source]]:
-        idx = self.INDEXERS
-
         if len(self.INDEXERS) > 0:
             warnings.warn("'INDEXERS' is deprecated. Please use 'SOURCES'!", DeprecationWarning)
 
@@ -68,11 +64,11 @@ class Config(NamedTuple):
                 yield Source(r)
 
     @property
-    def cache_dir(self) -> Optional[Path]:
+    def cache_dir(self) -> Path | None:
         # TODO we used to use this for cachew, but it's best to rely on HPI modules etc to cofigure this
         # keeping just in case for now
         cd = self.CACHE_DIR
-        cpath: Optional[Path]
+        cpath: Path | None
         if cd is None:
             cpath = None # means 'disabled' in cachew
         elif cd == '': # meh.. but need to make it None friendly..
@@ -96,10 +92,10 @@ class Config(NamedTuple):
         return self.output_dir / 'promnesia.sqlite'
 
     @property
-    def hook(self) -> Optional[HookT]:
+    def hook(self) -> HookT | None:
         return self.HOOK
 
-instance: Optional[Config] = None
+instance: Config | None = None
 
 
 def has() -> bool:
@@ -139,7 +135,7 @@ def import_config(config_file: PathIsh) -> Config:
 
 
 # TODO: ugh. this causes warnings to be repeated multiple times... need to reuse the pool or something..
-def use_cores() -> Optional[int]:
+def use_cores() -> int | None:
     '''
     Somewhat experimental.
     For now only used in sources.auto, perhaps later will be shared among the other indexers.
@@ -154,7 +150,7 @@ def use_cores() -> Optional[int]:
         return 0
 
 
-def extra_fd_args() -> List[str]:
+def extra_fd_args() -> list[str]:
     '''
     Not sure where it belongs yet... so via env variable for now
     Can be used to pass --ignore-file parameter

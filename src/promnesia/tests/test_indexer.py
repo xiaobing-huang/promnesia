@@ -1,14 +1,18 @@
 from collections import Counter
 from pathlib import Path
-from subprocess import check_call, Popen
+from subprocess import Popen, check_call
+
+import pytest
 
 from ..__main__ import do_index, read_example_config
 from ..common import DbVisit, _is_windows
 from ..database.load import get_all_db_visits
-
-import pytest
-
-from .common import get_testdata, promnesia_bin, reset_filters, write_config
+from .common import (
+    get_testdata,
+    promnesia_bin,
+    reset_filters,  # noqa: F401
+    write_config,
+)
 
 
 def get_stats(tmp_path: Path) -> Counter:
@@ -28,7 +32,7 @@ def test_indexing_mode(tmp_path: Path, mode: str) -> None:
         from promnesia.common import Source
         from promnesia.sources import demo
 
-        SOURCES = [
+        SOURCES = [  # noqa: F841
             Source(demo.index, count=10, base_dt='2000-01-01', delta=30, name='demo1'),
             Source(demo.index, count=20, base_dt='2001-01-01', delta=30, name='demo2'),
         ]
@@ -44,7 +48,7 @@ def test_indexing_mode(tmp_path: Path, mode: str) -> None:
         from promnesia.common import Source
         from promnesia.sources import demo
 
-        SOURCES = [
+        SOURCES = [  # noqa: F841
             Source(demo.index, count=30, base_dt='2005-01-01', delta=30, name='demo2'),
             Source(demo.index, count=40, base_dt='2010-01-01', delta=30, name='demo3'),
         ]
@@ -69,7 +73,7 @@ def test_concurrent_indexing(tmp_path: Path) -> None:
         from promnesia.common import Source
         from promnesia.sources import demo
 
-        SOURCES = [Source(demo.index, count=10)]
+        SOURCES = [Source(demo.index, count=10)]  # noqa: F841
 
     cfg_fast_path = tmp_path / 'cfg_fast.py'
     write_config(cfg_fast_path, cfg_fast)
@@ -78,7 +82,7 @@ def test_concurrent_indexing(tmp_path: Path) -> None:
         from promnesia.common import Source
         from promnesia.sources import demo
 
-        SOURCES = [Source(demo.index, count=100_000)]
+        SOURCES = [Source(demo.index, count=100_000)]  # noqa: F841
 
     cfg_slow_path = tmp_path / 'cfg_slow.py'
     write_config(cfg_slow_path, cfg_slow)
@@ -118,11 +122,11 @@ def test_filter(tmp_path: Path, reset_filters) -> None:
         from promnesia.sources import shellcmd
         from promnesia.sources.plaintext import extract_from_path
 
-        FILTERS = [
+        FILTERS = [  # noqa: F841
             domain_to_filter,
         ]
 
-        SOURCES = [Source(shellcmd.index, extract_from_path(testdata))]
+        SOURCES = [Source(shellcmd.index, extract_from_path(testdata))]  # noqa: F841
 
     cfg_path = tmp_path / 'config.py'
     write_config(cfg_path, cfg, testdata=testdata, domain_to_filter=domain_to_filter)
@@ -143,7 +147,7 @@ def test_weird_urls(tmp_path: Path) -> None:
         from promnesia.sources import shellcmd
         from promnesia.sources.plaintext import extract_from_path
 
-        SOURCES = [Source(shellcmd.index, extract_from_path(testdata))]
+        SOURCES = [Source(shellcmd.index, extract_from_path(testdata))]  # noqa: F841
 
     cfg_path = tmp_path / 'config.py'
     write_config(cfg_path, cfg, testdata=get_testdata('weird.txt'))
@@ -172,7 +176,7 @@ def test_errors_during_indexing(tmp_path: Path) -> None:
         def indexer2():
             raise RuntimeError("in this case indexer itself crashed")
 
-        SOURCES = [Source(indexer1), Source(indexer2)]
+        SOURCES = [Source(indexer1), Source(indexer2)]  # noqa: F841
 
     cfg_path = tmp_path / 'config.py'
     write_config(cfg_path, cfg)
@@ -190,9 +194,11 @@ def test_hook(tmp_path: Path) -> None:
         from promnesia.common import Source
         from promnesia.sources import demo
 
-        SOURCES = [Source(demo.index, count=7, name='somename')]
+        SOURCES = [Source(demo.index, count=7, name='somename')]  # noqa: F841
 
-        from typing import cast, Iterator
+        from collections.abc import Iterator
+        from typing import cast
+
         from promnesia.common import DbVisit, Loc, Res
         from promnesia.sources import demo
 
@@ -204,7 +210,7 @@ def test_hook(tmp_path: Path) -> None:
             if 'page1' in nurl:
                 yield visit._replace(norm_url='patched.com')
             elif 'page2' in nurl:
-                raise Exception('boom')  # deliberately crash
+                raise RuntimeError('boom')  # deliberately crash
             elif 'page3' in nurl:
                 # just don't yield anything! it will be omitted
                 pass
@@ -235,7 +241,7 @@ def test_example_config(tmp_path: Path) -> None:
     if _is_windows:
         pytest.skip("doesn't work on Windows: example config references /usr/include paths")
 
-    config = read_example_config() + '\n' + f'OUTPUT_DIR = "{str(tmp_path)}"'
+    config = read_example_config() + '\n' + f'OUTPUT_DIR = "{tmp_path!s}"'
     cfg_path = tmp_path / 'example_config.py'
     cfg_path.write_text(config)
 

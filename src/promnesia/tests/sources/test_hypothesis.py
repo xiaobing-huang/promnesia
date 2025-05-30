@@ -1,10 +1,10 @@
 from pathlib import Path
 
-from ..common import write_config, get_testdata
+from my.core.cfg import tmp_config
+
 from ...__main__ import do_index
 from ...database.load import get_all_db_visits
-
-from my.core.cfg import tmp_config
+from ..common import get_testdata, write_config
 
 
 def index_hypothesis(tmp_path: Path) -> None:
@@ -12,7 +12,7 @@ def index_hypothesis(tmp_path: Path) -> None:
         from promnesia.common import Source
         from promnesia.sources import hypothesis
 
-        SOURCES = [Source(hypothesis.index, name='hyp')]
+        SOURCES = [Source(hypothesis.index, name='hyp')]  # noqa: F841
 
     cfg_path = tmp_path / 'config.py'
     write_config(cfg_path, cfg)
