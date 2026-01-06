@@ -1,6 +1,7 @@
 """
 Collects visits from Signal Desktop's encrypted SQLIite db(s).
 """
+
 from __future__ import annotations
 
 # Functions get their defaults from module-data.
@@ -17,17 +18,15 @@ from collections.abc import Iterable, Iterator, Mapping
 from contextlib import contextmanager
 from pathlib import Path
 from textwrap import dedent, indent
-from typing import Any, Union
+from typing import Any
 
 from ..common import Loc, PathIsh, Results, Visit, extract_urls, from_epoch
-
-PathIshes = Union[PathIsh, Iterable[PathIsh]]
 
 
 def index(
     *db_paths: PathIsh,
     http_only: bool = False,
-    locator_schema: str="editor",
+    locator_schema: str = "editor",
     append_platform_path: bool = False,
     override_key: str | None = None,
 ) -> Results:
@@ -51,8 +50,7 @@ def index(
         otherwise, this same key is used for harvesting all db-files.
     """
     logger.debug(
-        "http_only?(%s), locator_schema?(%s), append_platform_path?(%s), "
-        "overide_key given?(%s), db_paths: %s",
+        "http_only?(%s), locator_schema?(%s), append_platform_path?(%s), overide_key given?(%s), db_paths: %s",
         http_only,
         locator_schema,
         append_platform_path,
@@ -197,7 +195,7 @@ def _expand_path(path_pattern: PathIsh) -> Iterable[Path]:
     return path.glob(str(Path(*parts))) if parts else [path]
 
 
-def _expand_paths(paths: PathIshes) -> Iterable[Path]:
+def _expand_paths(paths: PathIsh | Iterable[PathIsh]) -> Iterable[Path]:
     if _is_pathish(paths):
         paths = [paths]  # type: ignore[list-item]
     return [pp.resolve() for p in paths for pp in _expand_path(p)]  # type: ignore[union-attr]
@@ -245,8 +243,7 @@ def collect_db_paths(*db_paths: PathIsh, append: bool = False) -> Iterable[Path]
             plat_paths = platform_db_paths[platform_name]
         except LookupError as le:
             raise ValueError(
-                f"Unknown platform({platform_name}!"
-                f"\n  Expected one of {list(platform_db_paths.keys())}."
+                f"Unknown platform({platform_name}!\n  Expected one of {list(platform_db_paths.keys())}."
             ) from le
 
         if db_paths and append:
@@ -331,9 +328,7 @@ def connect_db(
             )
             sql = "\n".join(sql_cmds)
             cmd = [sqlcipher_exe, str(db_path)]
-            logger.debug(
-                "Decrypting db '%s' with cmd: %s <<<EOF\n%s\nEOF", db_path, cmd, sql
-            )
+            logger.debug("Decrypting db '%s' with cmd: %s <<<EOF\n%s\nEOF", db_path, cmd, sql)
             try:
                 sbp.run(
                     cmd,
@@ -369,7 +364,6 @@ def connect_db(
         finally:
             if decrypted_file and decrypted_file.exists():
                 try:
-
                     logger.debug("Deleting temporary decrypted db: %s", decrypted_file)
                     decrypted_file.unlink()
                 except Exception as ex:
@@ -382,7 +376,7 @@ def connect_db(
 
 
 def _handle_row(row: tuple, db_path: PathIsh, locator_schema: str) -> Results:
-    mid, tstamp, sender, cid, chatname, text = row
+    mid, tstamp, sender, _cid, chatname, text = row
     urls = extract_urls(text)
     if not urls:
         return

@@ -33,7 +33,7 @@ def index(command: str | Sequence[PathIsh]) -> Results:
         warnings.warn("Passing string as a command is very fragile('{command}'). Please use list instead.")
         cmd = command.split(' ')
     else:
-        cmds = ' '.join(map(str, command))
+        cmds = ' '.join(map(str, command))  # ty: ignore[invalid-argument-type]  # see https://github.com/astral-sh/ty/issues/2091
         cmd = command
 
     # ugh... on windows grep does something nasty? e.g:
@@ -52,9 +52,9 @@ def index(command: str | Sequence[PathIsh]) -> Results:
             fname = None
             lineno = None
         else:
-            fname  = m.group(1)
+            fname = m.group(1)
             lineno = int(m.group(2))
-            line   = m.group(3)
+            line = m.group(3)
 
         if fname is not None and needs_windows_grep_patching:
             fname = fname.replace('/', os.sep)
@@ -83,7 +83,7 @@ def index(command: str | Sequence[PathIsh]) -> Results:
 
     r = run(cmd, stdout=PIPE, check=False)
     if r.returncode > 0:
-        if not (cmd[0] in {'grep', 'findstr'} and r.returncode == 1): # ugh. grep returns 1 on no matches...
+        if not (cmd[0] in {'grep', 'findstr'} and r.returncode == 1):  # ugh. grep returns 1 on no matches...
             r.check_returncode()
     output = r.stdout
     assert output is not None

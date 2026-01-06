@@ -1,14 +1,14 @@
+import re
 from contextlib import contextmanager
 from pathlib import Path
-import re
-from time import sleep
 from subprocess import Popen, check_output
-from typing import Optional, List, Union
+from time import sleep
 
 # TODO decorator that records a video if a certain env var/flag is set (pass a custom name too)
 
+
 @contextmanager
-def hotkeys(geometry: Optional[str]=None):
+def hotkeys(geometry: str | None = None):
     # TODO kill in advance??
     ctx = Popen([
         'screenkey',
@@ -22,7 +22,7 @@ def hotkeys(geometry: Optional[str]=None):
         '--opacity', '0.6',
         # TODO hmm. it has --persist arg, but no --no-persist??
         *([] if geometry is None else ['-g', geometry]),
-    ])
+    ])  # fmt: skip
     with ctx as p:
         try:
             yield p
@@ -30,13 +30,11 @@ def hotkeys(geometry: Optional[str]=None):
             p.kill()
 
 
-
 @contextmanager
-def record(output: Optional[Path]=None, wid: Optional[str]=None, quality: Optional[str]=None):
+def record(output: Path | None = None, wid: str | None = None, quality: str | None = None):
     assert output is not None, "TODO use tmp file or current dir??"
     # TODO to fullscreen if None?
     assert wid is not None
-
 
     # ugh. no idea wtf is happening here... why is position 2,90??
     # wmctrl -i -r 230686723 -e '0,0,0,400,400'
@@ -58,9 +56,9 @@ def record(output: Optional[Path]=None, wid: Optional[str]=None, quality: Option
     titlebar = 32
 
     # fuck x 2
-    margin   = 28
+    margin = 28
 
-    cmd: List[Union[Path, str]] = [
+    cmd: list[Path | str] = [
         'ffmpeg',
         '-hide_banner', '-loglevel', 'panic', # less spam in the terminal
         '-f', 'x11grab',
@@ -69,7 +67,7 @@ def record(output: Optional[Path]=None, wid: Optional[str]=None, quality: Option
         '-s', f'{w}x{titlebar + int(h)}',
         '-i', f':0.0+{x},{margin + int(y)}',
         output,
-    ]
+    ]  # fmt: skip
     # TODO not sure if need converter script
     # TODO double check there are no ffmpeg processes remaining?
     # maybe, set timeout?

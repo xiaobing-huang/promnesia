@@ -21,6 +21,7 @@ def index(*, render_markdown: bool = False, renderer: type[RedditRenderer] | Non
     except ModuleNotFoundError as e:
         if "No module named 'my.reddit.all'" in str(e):
             import warnings
+
             warnings.warn("DEPRECATED/reddit: Using an old version of HPI, please update")
             from my.reddit import comments, saved, submissions, upvoted
         else:
@@ -69,6 +70,7 @@ class RedditRenderer:
         self._parser_cls = None
         try:
             from .markdown import TextParser, extract_from_text
+
             self._link_extractor = extract_from_text
             self._parser_cls = TextParser
         except ImportError as import_err:
@@ -78,10 +80,11 @@ class RedditRenderer:
             # only send error if the user is trying to enable this feature
             if render_markdown:
                 logger.exception(import_err)
-                logger.critical("Could not import markdown module to render reddit markdown. Try 'python3 -m pip install mistletoe'")
+                logger.critical(
+                    "Could not import markdown module to render reddit markdown. Try 'python3 -m pip install mistletoe'"
+                )
             render_markdown = False  # force to be false, couldn't import
         self.render_markdown = render_markdown
-
 
     def _from_comment(self, i: Comment) -> Results:
         locator = Loc.make(
@@ -90,14 +93,12 @@ class RedditRenderer:
         )
         yield from self._from_common(i, locator=locator)
 
-
     def _from_submission(self, i: Submission) -> Results:
         locator = Loc.make(
             title=f'Reddit submission: {i.title}',
             href=i.url,
         )
         yield from self._from_common(i, locator=locator)
-
 
     def _from_upvote(self, i: Upvote) -> Results:
         locator = Loc.make(
@@ -106,7 +107,6 @@ class RedditRenderer:
         )
         yield from self._from_common(i, locator=locator)
 
-
     def _from_save(self, i: Save) -> Results:
         locator = Loc.make(
             title='Reddit save',
@@ -114,14 +114,12 @@ class RedditRenderer:
         )
         yield from self._from_common(i, locator=locator)
 
-
     # to allow for possible subclassing by the user?
     def _render_body(self, text: str) -> str:
         if self.render_markdown and self._parser_cls is not None:
             return self._parser_cls(text)._doc_ashtml()
         else:
             return text
-
 
     def _from_common(self, i: RedditBase, locator: Loc) -> Results:
         urls = [i.url]
@@ -170,4 +168,3 @@ class RedditRenderer:
                     locator=locator,
                 )
                 emitted.add(res.url)
-

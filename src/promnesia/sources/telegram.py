@@ -6,7 +6,7 @@ from urllib.parse import unquote  # TODO mm, make it easier to rememember to use
 from promnesia.common import Loc, PathIsh, Results, Visit, extract_urls, logger
 
 
-def index(database: PathIsh | None=None, *, http_only: bool=False, with_extra_media_info: bool=False)  -> Results:
+def index(database: PathIsh | None = None, *, http_only: bool = False, with_extra_media_info: bool = False) -> Results:
     if database is None:
         # fully relying on HPI
         yield from _index_new(http_only=http_only, with_extra_media_info=with_extra_media_info)
@@ -17,7 +17,9 @@ def index(database: PathIsh | None=None, *, http_only: bool=False, with_extra_me
         f'Will try to hack database path {database} into HPI config.'
     )
     try:
-        yield from _index_new_with_adhoc_config(database=database, http_only=http_only, with_extra_media_info=with_extra_media_info)
+        yield from _index_new_with_adhoc_config(
+            database=database, http_only=http_only, with_extra_media_info=with_extra_media_info
+        )
     except Exception as e:
         logger.exception(e)
         warnings.warn("Hacking my.config.telegram.telegram_backup didn't work. You probably need to update HPI.")
@@ -30,11 +32,12 @@ def index(database: PathIsh | None=None, *, http_only: bool=False, with_extra_me
 
 def _index_legacy(*, database: PathIsh, http_only: bool) -> Results:
     from . import telegram_legacy
+
     yield from telegram_legacy.index(database=database, http_only=http_only)
 
 
 def _index_new_with_adhoc_config(*, database: PathIsh, http_only: bool, with_extra_media_info: bool) -> Results:
-    from . import hpi  # noqa: F401,I001
+    from . import hpi  # noqa: F401
 
     class config:
         class telegram:
@@ -42,6 +45,7 @@ def _index_new_with_adhoc_config(*, database: PathIsh, http_only: bool, with_ext
                 export_path: PathIsh = database
 
     from my.core.cfg import tmp_config
+
     with tmp_config(modules='my.telegram.telegram_backup', config=config):
         yield from _index_new(http_only=http_only, with_extra_media_info=with_extra_media_info)
 

@@ -1,5 +1,7 @@
+// FIXME -- still need to sync more things with grasp
+// mainly maybe consider dropping manifest v2...
 // due to firefox + chrome and manifest v2 + v3 combination, 95% of the manifest is JS generated anyway
-// so with this we're just generaing it fully dynamically
+// so with this we're just generating it fully dynamically
 
 import assert from 'assert'
 
@@ -14,17 +16,16 @@ const T = {
 // ugh. declarative formats are shit.
 export function generateManifest({
     target,  // str
-    version, // str
-    release, // bool
+    manifest_version, // str
     publish, // bool
     ext_id   // str
 } = {}) {
     assert(target)
-    assert(version)
-    assert(release !== null)
+    assert(manifest_version)
+    assert(publish !== null)
     assert(ext_id)
 
-    const v3 = version == '3'
+    const v3 = manifest_version == '3'
 
     // Firefox wouldn't let you rebind its default shortcuts most of which use Shift
     // On the other hand, Chrome wouldn't let you use Alt
@@ -68,6 +69,12 @@ export function generateManifest({
         "default_icon": "images/ic_not_visited_48.png",
         "default_title": "Show promnesia sidebar",
     }
+    if (target === T.FIREFOX) { // only supported in firefox https://github.com/mozilla/web-ext/issues/2874
+        // otherwise firefox hides the icon under the "puzzle piece" menu
+        // At the very least it's annoying for testing, but also for promnesia it makes sense to show anyway
+        action["default_area"] = "navbar"
+        // in chrome, we're achieving the same thing by injecting "key" (see below)
+    }
 
 
     const endpoints = (domain) => [
@@ -94,6 +101,7 @@ export function generateManifest({
 
 
     // TODO make permissions literate
+    // keep in sync with readme
     const permissions = [
         // for keeping extension settings
         "storage",
@@ -145,6 +153,7 @@ export function generateManifest({
     if (v3) {
         if (target === T.CHROME) {
             // webext lint will warn about this since it's not supported in firefox yet
+            // see https://github.com/mozilla/web-ext/issues/2916
             background['service_worker'] = 'background.js'
 
             // this isn't supported in chrome manifest v3 (chrome warns about unsupported field)
@@ -175,7 +184,7 @@ export function generateManifest({
     const web_accessible_resources = v3 ? [{resources: _resources, matches: [ '*://*/*']}] : _resources
 
     const manifest = {
-        name: pkg.name + (release ? '' : ' [dev]'),
+        name: pkg.name + (publish ? '' : ' [dev]'),
         version: pkg.version,
         description: pkg.description,
         permissions: permissions,
@@ -220,17 +229,8 @@ export function generateManifest({
     }
 
     if (v3) {
-        if (target === T.FIREFOX) {
-            // firefox doesn't support optional_host_permissions yet
-            // see https://bugzilla.mozilla.org/show_bug.cgi?id=1766026
-            // and https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/manifest.json/optional_permissions#host_permissions
-            // note that these will still have to be granted by user (unlike in chrome)
-            manifest.host_permissions = host_permissions
-            manifest.optional_permissions.push(...optional_host_permissions)
-        } else {
-            manifest.host_permissions = host_permissions
-            manifest.optional_host_permissions = optional_host_permissions
-        }
+        manifest.host_permissions = host_permissions
+        manifest.optional_host_permissions = optional_host_permissions
     } else {
         manifest.permissions.push(...host_permissions)
         manifest.optional_permissions.push(...optional_host_permissions)
@@ -243,8 +243,16 @@ export function generateManifest({
         manifest['browser_specific_settings'] = {
             'gecko': {
                 'id': gecko_id,
+                'data_collection_permissions': {  // required for new firefox addons
+                    'required': ['none']
+                },
             },
         }
+    }
+    if (target === T.CHROME) {
+        // to achieve stable extension id, needs "key" in manifest.json (this is injected in generate_manifest)
+        // see https://developer.chrome.com/docs/extensions/reference/manifest/key
+        manifest['key'] = "cHJvbW5lc2lhLWV4dGVuc2lvbi1pZA=="  // this needs to be a base64 string
     }
     return manifest
 }

@@ -9,7 +9,7 @@ from collections.abc import Iterator
 from contextlib import closing, contextmanager
 from pathlib import Path
 from textwrap import dedent
-from typing import NoReturn, TypeVar
+from typing import NoReturn
 
 import pytest
 
@@ -97,11 +97,7 @@ def reset_filters():
         extract.filters.cache_clear()
 
 
-# TODO could be a TypeGuard from 3.10
-V = TypeVar('V')
-
-
-def unwrap(r: Res[V]) -> V:
+def unwrap[V](r: Res[V]) -> V:
     assert not isinstance(r, Exception), r
     return r
 
@@ -115,6 +111,7 @@ def write_config(path: Path, gen, **kwargs) -> None:
     path.write_text(cfg_src)
 
 
+# TODO there is also implementation here? https://github.com/SeleniumHQ/selenium/blob/4c64df2cde912aec7000589b2dc96fd21c6c27cd/py/selenium/webdriver/common/utils.py#L30
 @contextmanager
 def free_port() -> Iterator[int]:
     # this is a generator to make sure there are no race conditions between the time we call this and launch program

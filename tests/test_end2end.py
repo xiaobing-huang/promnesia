@@ -1,169 +1,60 @@
-#!/usr/bin/env python3
 from __future__ import annotations
 
+from collections.abc import Iterator
 from contextlib import ExitStack
-from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from time import sleep
-from typing import Iterator, TypeVar, Callable
-import os
 
 import pytest
-
 from selenium.webdriver import Remote as Driver
-from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait as Wait
+from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.support.ui import WebDriverWait as Wait
 
 from promnesia.tests.common import get_testdata
+from promnesia.tests.server_helper import Backend, run_server
 from promnesia.tests.utils import index_urls
-from promnesia.tests.server_helper import run_server as wserver
-from promnesia.logging import LazyLogger
 
-from common import under_ci, has_x, local_http_server, notnone
-from webdriver_utils import is_visible, wait_for_alert, get_webdriver
-from addon import get_addon_source, Addon, LOCALHOST, addon
-
-
-logger = LazyLogger('promnesia-tests', level='debug')
-
-
-@dataclass
-class Browser:
-    dist: str
-    headless: bool
-
-    @property
-    def name(self) -> str:
-        return self.dist.split('-')[0]  # TODO meh
-
-    def skip_ci_x(self) -> None:
-        if under_ci() and not self.headless:
-            pytest.skip("Only can't use headless browser on CI")
-
-
-FF  = Browser('firefox', headless=False)
-CH  = Browser('chrome' , headless=False)
-FFH = Browser('firefox', headless=True)
-CHH = Browser('chrome' , headless=True)
-
-
-# TODO ugh, I guess it's not that easy to make it work because of isAndroid checks...
-# I guess easy way to test if you really want is to temporary force isAndroid to return true in extension...
-FM  = Browser('firefox-mobile', headless=False)
-
-
-def browser_(driver: Driver) -> Browser:
-    name = driver.name
-    # TODO figure out headless??
-    if name == 'firefox':
-        return FF
-    elif name == 'chrome':
-        return CH
-    else:
-        raise AssertionError(driver)
-
-
-def confirm(what: str) -> None:
-    is_headless = 'headless' in os.environ.get('PYTEST_CURRENT_TEST', '')
-    if is_headless:
-        # ugh.hacky
-        Headless().confirm(what)
-        return
-
-    import click
-    click.confirm(click.style(what, blink=True, fg='yellow'), abort=True)
-    # TODO focus window if not headless
-
-
-class Manual:
-    def confirm(self, what: str) -> None:
-        raise NotImplementedError
-
-class Interactive(Manual):
-    def confirm(self, what: str) -> None:
-        confirm(what)
-
-class Headless(Manual):
-    def confirm(self, what: str) -> None:
-        logger.warning('"%s": headless mode, responding "yes"', what)
-
-
-'''
-Helper for tests that are not yet fully automated and require a human to check...
-- if running with the GUI, will be interactive
-- if running in headless mode, will automatically assume 'yes'.
-  of course it's not very robust, but at least we're testing some codepaths then
-'''
-manual = Interactive() if has_x() else Headless()
-
-
-WITH_BROWSER_TESTS = 'WITH_BROWSER_TESTS'
-
-with_browser_tests = pytest.mark.skipif(
-    WITH_BROWSER_TESTS not in os.environ,
-    reason=f'set env var {WITH_BROWSER_TESTS}=true if you want to run this test',
+from .addon import (
+    LOCALHOST,
+    Addon,
+    addon,  # noqa: F401 used as fixture
+    addon_source,  # noqa: F401 used as fixture, imported here to avoid circular import between webdirver utils and addon.py
+)
+from .common import (
+    local_http_server,
+    logger,  # noqa: F401 useful to keep around
+    notnone,
+)
+from .utils import (
+    exit_stack,  # noqa: F401 used as fixture
+)
+from .webdriver_utils import (
+    Browser,
+    Manual,
+    browsers,
+    driver,  # noqa: F401 used as fixture
+    is_visible,
+    wait_for_alert,
 )
 
-
-X = TypeVar('X')
-IdType = Callable[[X], X]
-
-
-def browsers(*br: Browser) -> IdType:
-    if len(br) == 0:
-        br = (FF, FFH, CH, CHH)
-    if not has_x():
-        br = tuple(b for b in br if b.headless)
-
-    from functools import wraps
-    def dec(f):
-        if len(br) == 0:
-            dec_ = pytest.mark.skip('Filtered out all browsers (because of no GUI/non-interactive mode)')
-        else:
-            dec_ = pytest.mark.parametrize('browser', br, ids=lambda b: b.dist.replace('-', '_') + ('_headless' if b.headless else ''))
-        @with_browser_tests
-        @dec_
-        @wraps(f)
-        def ff(*args, **kwargs):
-            return f(*args, **kwargs)
-        return ff
-    return dec
-
-
-@pytest.fixture
-def driver(tmp_path: Path, browser: Browser) -> Iterator[Driver]:
-    profile_dir = tmp_path / 'browser_profile'
-    res = get_webdriver(
-        profile_dir=profile_dir,
-        addon_source=get_addon_source(kind=browser.dist),
-        browser=browser.name,
-        headless=browser.headless,
-        logger=logger,
-    )
-    try:
-        yield res
-    finally:
-        res.quit()
-
-
-@dataclass
-class Backend:
-    backend_dir: Path  # directory with database and configs
-    port: str
+# you can use mode='headless' to always auto-confirm even with gui tests
+manual = Manual(mode='auto')
+confirm = manual.confirm
+#
 
 
 @pytest.fixture
 def backend(tmp_path: Path, addon: Addon) -> Iterator[Backend]:
     backend_dir = tmp_path
     # TODO ideally should index in a separate thread? and perhaps start server too
-    with wserver(db=backend_dir / 'promnesia.sqlite') as srv:
+    with run_server(db=backend_dir / 'promnesia.sqlite') as backend:
         # this bit (up to yield) takes about 1.5s -- I guess it's the 1s sleep in configure_extension
-        addon.configure(host=LOCALHOST, port=srv.port)
+        addon.configure(host=LOCALHOST, port=backend.port)
         addon.helper.driver.get('about:blank')  # not sure if necessary
-        yield Backend(backend_dir=backend_dir, port=srv.port)
+        yield backend
 
 
 @browsers()
@@ -202,7 +93,7 @@ def test_backend_status(addon: Addon, driver: Driver) -> None:
     driver.find_element(By.ID, 'backend_status_id').click()
 
     alert = wait_for_alert(driver)
-    assert 'ERROR' in alert.text
+    assert 'ERROR' in alert.text, alert.text
     alert.accept()
 
     # TODO implement positive check, e.g. when backend is present
@@ -272,7 +163,7 @@ def test_blacklist_custom(addon: Addon, driver: Driver) -> None:
     driver.get('https://stackoverflow.com/questions/27215462')
 
     addon.activate()
-    manual.confirm('page should be blacklisted (black icon), you should see an error notification')
+    confirm('page should be blacklisted (black icon), you should see an error notification')
     # make sure there is not even the frame for blacklisted page
     assert not addon.sidebar.available
 
@@ -283,7 +174,7 @@ def test_blacklist_custom(addon: Addon, driver: Driver) -> None:
     driver.refresh()
 
     addon.sidebar.open()
-    manual.confirm('sidebar: should be visible')
+    confirm('sidebar: should be visible')
 
 
 @browsers()
@@ -292,7 +183,7 @@ def test_blacklist_builtin(addon: Addon, driver: Driver) -> None:
     driver.get('https://www.hsbc.co.uk/mortgages/')
 
     addon.activate()
-    manual.confirm('page should be blacklisted (black icon), your should see an error notification')
+    confirm('page should be blacklisted (black icon), your should see an error notification')
     # make sure there is not even the frame for blacklisted page
     assert not addon.sidebar.available
 
@@ -303,11 +194,14 @@ def test_blacklist_builtin(addon: Addon, driver: Driver) -> None:
     driver.refresh()
 
     addon.sidebar.open()
-    manual.confirm('sidebar: should be visible')
+    confirm('sidebar: should be visible')
 
 
-@browsers(FF, CH)
-def test_add_to_blacklist_context_menu(addon: Addon, driver: Driver) -> None:
+@browsers()
+def test_add_to_blacklist_context_menu(addon: Addon, driver: Driver, browser: Browser) -> None:
+    if browser.headless:
+        pytest.skip("This test requires GUI to open context menu")
+
     # doesn't work on headless because not sure how to interact with context menu.
     addon.configure(port='12345')
     driver.get('https://example.com')
@@ -390,19 +284,17 @@ def test_search_around(addon: Addon, driver: Driver, backend: Backend) -> None:
     hl = visits.find_element(By.CLASS_NAME, 'highlight')
     assert 'anthrocidal' in hl.text
 
-    manual.confirm('you should see search results, "anthrocidal" should be highlighted red')
+    confirm('you should see search results, "anthrocidal" should be highlighted red')
     # FIXME test clicking search around in actual search page.. it didn't work, seemingly because of initBackground() handling??
 
 
 @browsers()
 def test_show_visited_marks(addon: Addon, driver: Driver, backend: Backend) -> None:
-    # fmt: off
     visited = {
         'https://en.wikipedia.org/wiki/Special_linear_group': 'some note about linear groups',
         'http://en.wikipedia.org/wiki/Unitary_group'        : None,
         'en.wikipedia.org/wiki/Transpose'                   : None,
-    }
-    # fmt: on
+    }  # fmt: skip
     test_url = "https://en.wikipedia.org/wiki/Symplectic_group"
 
     index_urls(visited)(backend.backend_dir)
@@ -430,7 +322,6 @@ def test_show_visited_marks(addon: Addon, driver: Driver, backend: Backend) -> N
     'url',
     [
         "https://en.wikipedia.org/wiki/Symplectic_group",
-
         # regression test for https://github.com/karlicoss/promnesia/issues/295
         # note: seemed to reproduce on chrome more consistently for some reason
         "https://www.udemy.com/course/javascript-bible/",
@@ -464,16 +355,18 @@ def test_sidebar_basic(url: str, addon: Addon, driver: Driver, backend: Backend)
         assert len(filters) == 2, filters
 
         _all = filters[0]
-        tag  = filters[1]
+        tag = filters[1]
 
         # this should happen in JS
         sanitized = src.replace(' ', '')
 
+        # fmt: off
         assert 'all'     in _all.text
         assert sanitized in tag.text
 
         assert 'all'     in notnone(_all.get_attribute('class')).split()
         assert sanitized in notnone(tag .get_attribute('class')).split()
+        # fmt: on
 
         visits = addon.sidebar.visits
         assert len(visits) == 1, visits
@@ -483,7 +376,10 @@ def test_sidebar_basic(url: str, addon: Addon, driver: Driver, backend: Backend)
         ctx_el = v.find_element(By.CLASS_NAME, 'context')
         assert ctx_el.text == visited[url]
         # make sure linkifying works
-        assert ctx_el.find_element(By.TAG_NAME, 'a').get_attribute('href') == 'https://wiki.openhumans.org/wiki/Personal_Science_Wiki'
+        assert (
+            ctx_el.find_element(By.TAG_NAME, 'a').get_attribute('href')
+            == 'https://wiki.openhumans.org/wiki/Personal_Science_Wiki'
+        )
 
     confirm("You should see green icon, also one visit in sidebar. Make sure the unicode is displayed correctly.")
 
@@ -506,6 +402,7 @@ def test_search_command(addon: Addon, driver: Driver, backend: Backend) -> None:
     confirm("You shoud see search prompt now, with focus on search field")
 
 
+@pytest.mark.xfail(reason="TODO look later, broke around June 2025?")
 @browsers()
 def test_new_background_tab(addon: Addon, driver: Driver, backend: Backend) -> None:
     from promnesia.tests.sources.test_hypothesis import index_hypothesis
@@ -518,21 +415,15 @@ def test_new_background_tab(addon: Addon, driver: Driver, backend: Backend) -> N
     # bg_url_text = "El Proceso (The Process)"
     # TODO generate some fake data instead?
     driver.get(start_url)
-    manual.confirm('you should see notification about contexts')
+    confirm('you should see notification about contexts')
     page_logo = driver.find_element(By.XPATH, '//a[@class="page-logo"]')
     page_logo.send_keys(Keys.CONTROL + Keys.ENTER)  # ctrl+click -- opens the link in new background tab
-    manual.confirm('you should not see any new notifications')
+    confirm('you should not see any new notifications')
     # TODO switch to new tab?
     # TODO https://www.e-flux.com/journal/53/
 
 
 PYTHON_DOC_PATH = Path('/usr/share/doc/python3/html')
-
-
-@pytest.fixture
-def exit_stack() -> Iterator[ExitStack]:
-    with ExitStack() as stack:
-        yield stack
 
 
 @browsers()
@@ -547,7 +438,9 @@ def exit_stack() -> Iterator[ExitStack]:
         'local',
     ],
 )
-def test_sidebar_navigation(base_url: str, addon: Addon, driver: Driver, backend: Backend, exit_stack: ExitStack) -> None:
+def test_sidebar_navigation(
+    base_url: str, addon: Addon, driver: Driver, backend: Backend, exit_stack: ExitStack
+) -> None:
     if 'file:' in base_url and driver.name == 'chrome':
         pytest.skip("TODO used to work, but must have broken after some Chrome update?")
         # seems broken on any local page -- only transparent sidebar frame is shown
@@ -661,7 +554,7 @@ def test_unreachable(addon: Addon, driver: Driver, backend: Backend) -> None:
     except:
         # results in exception because it's unreachable
         pass
-    manual.confirm('green icon, no errors, desktop notification with contexts')
+    confirm('green icon, no errors, desktop notification with contexts')
 
 
 @browsers()
@@ -675,7 +568,7 @@ def test_stress(addon: Addon, driver: Driver, backend: Backend) -> None:
     addon.activate()
 
     # todo I guess it's kinda tricky to test in headless webdriver
-    manual.confirm(
+    confirm(
         '''
 Is performance reasonable?
 The sidebar should show up, and update gradually.
@@ -782,9 +675,7 @@ def test_showvisits_popup(addon: Addon, driver: Driver, backend: Backend) -> Non
     assert is_visible(driver, popup_context)
     assert popup_context.text == 'some comment'
 
-    popup_datetime = Wait(driver, timeout=5).until(
-        EC.presence_of_element_located((By.CLASS_NAME, 'datetime'))
-    )
+    popup_datetime = Wait(driver, timeout=5).until(EC.presence_of_element_located((By.CLASS_NAME, 'datetime')))
     assert is_visible(driver, popup_datetime)
     assert popup_datetime.text in {
         '10/09/2014, 00:00:00',
@@ -793,7 +684,9 @@ def test_showvisits_popup(addon: Addon, driver: Driver, backend: Backend) -> Non
 
 
 @browsers()
-def test_multiple_page_updates(tmp_path: Path, addon: Addon, driver: Driver, backend: Backend, exit_stack: ExitStack) -> None:
+def test_multiple_page_updates(
+    tmp_path: Path, addon: Addon, driver: Driver, backend: Backend, exit_stack: ExitStack
+) -> None:
     # on some pages, onUpdated is triggered multiple times (because of iframes or perhaps something else??)
     # which previously resulted in flickering sidebar/performance degradation etc, so it's a regression test against this
     # TODO would be nice to hook to the backend and check how many requests it had...

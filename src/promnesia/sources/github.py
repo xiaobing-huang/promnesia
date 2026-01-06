@@ -1,6 +1,7 @@
 '''
 Uses [[https://github.com/karlicoss/HPI][HPI]] github module
 '''
+
 from __future__ import annotations
 
 # Note: requires the 'mistletoe' module if you enable render_markdown
@@ -16,7 +17,9 @@ def index(*, render_markdown: bool = False) -> Results:
             from .markdown import TextParser, extract_from_text
         except ImportError as import_err:
             logger.exception(import_err)
-            logger.critical("Could not import markdown module to render github body markdown. Try 'python3 -m pip install mistletoe'")
+            logger.critical(
+                "Could not import markdown module to render github body markdown. Try 'python3 -m pip install mistletoe'"
+            )
             render_markdown = False
 
     for e in events():

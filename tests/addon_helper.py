@@ -1,15 +1,17 @@
-from dataclasses import dataclass
-from functools import cached_property
+from __future__ import annotations
+
 import json
-from pathlib import Path
 import re
 import subprocess
+from dataclasses import dataclass
+from functools import cached_property
+from pathlib import Path
 from typing import Any
 
-from loguru import logger
 from selenium import webdriver
 
-from webdriver_utils import is_headless, get_browser_process
+from .common import logger
+from .webdriver_utils import get_browser_process, is_headless
 
 
 @dataclass
@@ -49,13 +51,19 @@ class AddonHelper:
     def headless(self) -> bool:
         return is_headless(self.driver)
 
+    @property
+    def has_selenium_bridge(self) -> bool:
+        return any(entry.get('js') == ['selenium_bridge.js'] for entry in self.manifest.get('content_scripts', []))
+
     def trigger_command(self, command: str) -> None:
         # note: also for chrome possible to extract from prefs['extensions']['commands'] if necessary
         commands = self.manifest['commands']
         assert command in commands, (command, commands)
 
         if self.headless:
-            # see selenium_bridge.js
+            assert self.has_selenium_bridge, (
+                "This won't work without selenium_bridge.js, you probably built the extension in --publish mode"
+            )
             ccc = f'selenium-bridge-{command}'
             self.driver.execute_script(
                 f"""
@@ -71,7 +79,7 @@ class AddonHelper:
     def gui_hotkey(self, key: str) -> None:
         assert not self.headless  # just in case
         lkey = key.lower().split('+')
-        logger.debug(f'sending hotkey {lkey}')
+        logger.debug(f'pyautogui: sending hotkey {lkey}')
 
         import pyautogui
 
@@ -80,6 +88,8 @@ class AddonHelper:
 
     def gui_write(self, *args, **kwargs) -> None:
         assert not self.headless
+
+        logger.debug(f'pyautogui: typing {args} {kwargs}')
 
         import pyautogui
 

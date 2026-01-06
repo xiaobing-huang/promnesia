@@ -4,7 +4,7 @@ import re
 from collections.abc import Iterable, Iterator
 from datetime import datetime
 from pathlib import Path
-from typing import NamedTuple, Optional, cast
+from typing import NamedTuple, cast
 
 import orgparse
 from orgparse.date import OrgDate, gene_timestamp_regex
@@ -25,6 +25,8 @@ from promnesia.common import (
 UPDATE_ORGPARSE_WARNING = 'WARNING: please update orgparse version to a more recent (pip3 install -U orgparse)'
 
 _warned = False
+
+
 def warn_old_orgparse_once() -> Iterable[Exception]:
     global _warned
     if _warned:
@@ -45,6 +47,7 @@ CREATED_RGX = re.compile(gene_timestamp_regex(brtype='inactive'), re.VERBOSE)
 ** subnote
 """
 
+
 class Parsed(NamedTuple):
     dt: datetime | None
     heading: str
@@ -56,14 +59,14 @@ def _parse_node(n: OrgNode) -> Parsed:
 
     heading = n.get_heading('raw')
     pp = n.properties
-    createds = cast(Optional[str], pp.get('CREATED', None))
+    createds = cast(str | None, pp.get('CREATED', None))
     if createds is None:
         # TODO replace with 'match', but need to strip off priority etc first?
         # see _parse_heading in orgparse
         # todo maybe use n.get_timestamps(inactive=True, point=True)? only concern is that it's searching in the body as well?
         m = CREATED_RGX.search(heading)
         if m is not None:
-            createds = m.group(0) # could be None
+            createds = m.group(0)  # could be None
             # todo a bit hacky..
             heading = heading.replace(createds + ' ', '')
     if createds is not None:
@@ -72,7 +75,11 @@ def _parse_node(n: OrgNode) -> Parsed:
             dt = None
         else:
             [odt] = OrgDate.list_from_str(createds)
-            dt = odt.start
+            start = odt.start
+            if not isinstance(start, datetime):  # could be date
+                dt = datetime.combine(start, datetime.min.time())  # meh, but the best we can do?
+            else:
+                dt = start
     else:
         dt = None
     return Parsed(dt=dt, heading=heading)
@@ -160,7 +167,7 @@ def extract_from_file(fname: PathIsh) -> Results:
 
         (parsed, node) = wr
         dt = parsed.dt
-        assert dt is not None # shouldn't be because of fallback
+        assert dt is not None  # shouldn't be because of fallback
         for r in iter_org_urls(node):
             # TODO get body recursively? not sure
             try:
@@ -170,7 +177,7 @@ def extract_from_file(fname: PathIsh) -> Results:
                 ctx = parsed.heading + tagss + '\n' + get_body_compat(node)
             except Exception as e:
                 yield e
-                ctx = 'ERROR' # TODO more context?
+                ctx = 'ERROR'  # TODO more context?
 
             if isinstance(r, Url):
                 yield Visit(
@@ -178,9 +185,11 @@ def extract_from_file(fname: PathIsh) -> Results:
                     dt=dt,
                     locator=Loc.file(
                         fname,
-                        line=getattr(node, 'linenumber', None), # make it defensive so it works against older orgparse (pre 0.2)
+                        line=getattr(
+                            node, 'linenumber', None
+                        ),  # make it defensive so it works against older orgparse (pre 0.2)
                     ),
                     context=ctx,
                 )
-            else: # error
+            else:  # error
                 yield r

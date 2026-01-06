@@ -1,23 +1,26 @@
 from __future__ import annotations
 
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from functools import lru_cache
 from pathlib import Path
-from typing import Callable, NamedTuple, Union
+from typing import NamedTuple
 
 from ..common import Results, Url
 
 # TODO doesn't really belong here...
 Ctx = Sequence[str]
 
+
 class EUrl(NamedTuple):
     url: Url
-    ctx: Ctx # TODO ctx here is more like a Loc
+    ctx: Ctx  # TODO ctx here is more like a Loc
+
+
 ###
 
 
 # keys are mime types + extensions
-Ex = Callable[[Path], Union[Results, Iterable[EUrl]]]
+Ex = Callable[[Path], Results | Iterable[EUrl]]
 # None means unhandled
 TYPE2IDX: dict[str, Ex | None] = {}
 # NOTE: there are some types in auto.py at the moment... it's a bit messy
@@ -27,13 +30,13 @@ TYPE2IDX: dict[str, Ex | None] = {}
 @lru_cache(None)
 def type2idx(t: str) -> Ex | None:
     if len(t) == 0:
-        return None # just in case?
+        return None  # just in case?
     # first try exact match
-    e = TYPE2IDX.get(t, None)
+    e = TYPE2IDX.get(t)
     if e is not None:
         return e
     t = t.strip('.')
-    e = TYPE2IDX.get(t, None)
+    e = TYPE2IDX.get(t)
     if e is not None:
         return e
     # otherwise, try prefixes?
@@ -41,6 +44,7 @@ def type2idx(t: str) -> Ex | None:
         if t.strip('.').startswith(k):
             return v
     return None
+
 
 # for now source code just indexed with grep, not sure if it's good enough?
 # if not, some fanceir library could be used...
@@ -82,7 +86,7 @@ CODE = {
 
     '.ts', # most likely typescript.. otherwise determined as text/vnd.trolltech.linguist mime
     '.js',
-}
+}  # fmt: skip
 # TODO discover more extensions with mimetypes library?
 
 
@@ -99,6 +103,7 @@ video/
 '''
 
 handle_later = lambda *_args, **_kwargs: ()
+
 
 def ignore(*_args, **_kwargs):
     # TODO log (once?)
@@ -129,7 +134,7 @@ TYPE2IDX.update({
     'application/zip'         : handle_later,
     'application/x-tar'       : handle_later,
     'application/gzip'        : handle_later,
-})
+})  # fmt: skip
 
 
 # TODO use some existing file for initial gitignore..
@@ -148,5 +153,4 @@ IGNORE = [
     # TODO not sure about these:
     '.gitignore',
     '.babelrc',
-]
-
+]  # fmt: skip

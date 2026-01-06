@@ -3,20 +3,25 @@
 Default logger is a bit meh, see 'test'/run this file for a demo
 '''
 
+
 def test() -> None:
     import logging
     import sys
-    from typing import Callable
+    from collections.abc import Callable
 
     M: Callable[[str], None] = lambda s: print(s, file=sys.stderr)
 
     M("   Logging module's defaults are not great...'")
     l = logging.getLogger('test_logger')
-    l.error("For example, this should be logged as error. But it's not even formatted properly, doesn't have logger name or level")
+    l.error(
+        "For example, this should be logged as error. But it's not even formatted properly, doesn't have logger name or level"
+    )
 
     M("   The reason is that you need to remember to call basicConfig() first")
     logging.basicConfig()
-    l.error("OK, this is better. But the default format kinda sucks, I prefer having timestamps and the file/line number")
+    l.error(
+        "OK, this is better. But the default format kinda sucks, I prefer having timestamps and the file/line number"
+    )
 
     M("")
     M("    With LazyLogger you get a reasonable logging format, colours and other neat things")
@@ -31,10 +36,10 @@ def test() -> None:
 import logging
 import os
 import warnings
-from typing import Optional, Union, cast
+from typing import cast
 
 Level = int
-LevelIsh = Optional[Union[Level, str]]
+LevelIsh = Level | str | None
 
 
 def mklevel(level: LevelIsh) -> Level:
@@ -50,18 +55,22 @@ def mklevel(level: LevelIsh) -> Level:
 
 
 FORMAT = '{start}[%(levelname)-7s %(asctime)s %(name)s %(filename)s:%(lineno)d]{end} %(message)s'
+# fmt: off
 FORMAT_COLOR   = FORMAT.format(start='%(color)s', end='%(end_color)s')
-FORMAT_NOCOLOR = FORMAT.format(start='', end='')
+FORMAT_NOCOLOR = FORMAT.format(start=''         , end='')
+# fmt: on
 DATEFMT = '%Y-%m-%d %H:%M:%S'
 
-COLLAPSE_DEBUG_LOGS = os.environ.get('COLLAPSE_DEBUG_LOGS', False)
+COLLAPSE_DEBUG_LOGS = os.environ.get('COLLAPSE_DEBUG_LOGS', False)  # noqa: PLW1508
 
 _init_done = 'lazylogger_init_done'
+
 
 def setup_logger(logger: logging.Logger, level: LevelIsh) -> None:
     lvl = mklevel(level)
     try:
-        import logzero  # type: ignore[import-not-found]
+        import logzero  # type: ignore[import-not-found,import-untyped,unused-ignore]
+
         formatter = logzero.LogFormatter(
             fmt=FORMAT_COLOR,
             datefmt=DATEFMT,
@@ -73,7 +82,7 @@ def setup_logger(logger: logging.Logger, level: LevelIsh) -> None:
         use_logzero = False
 
     logger.addFilter(AddExceptionTraceback())
-    if use_logzero and not COLLAPSE_DEBUG_LOGS: # all set, nothing to do
+    if use_logzero and not COLLAPSE_DEBUG_LOGS:  # all set, nothing to do
         # 'simple' setup
         logzero.setup_logger(logger.name, level=lvl, formatter=formatter)  # type: ignore[possibly-undefined]
         return
@@ -91,16 +100,17 @@ class LazyLogger(logging.Logger):
         logger = logging.getLogger(name)
 
         # this is called prior to all _log calls so makes sense to do it here?
-        def isEnabledFor_lazyinit(*args, logger=logger, orig=logger.isEnabledFor, **kwargs) -> bool:
+        def isEnabledFor_lazyinit(*args, logger: logging.Logger = logger, orig=logger.isEnabledFor, **kwargs) -> bool:
             if not getattr(logger, _init_done, False):  # init once, if necessary
                 setup_logger(logger, level=level)
                 setattr(logger, _init_done, True)
-                logger.isEnabledFor = orig # restore the callback
+                # restore the callback
+                logger.isEnabledFor = orig  # type: ignore[method-assign]
             return orig(*args, **kwargs)
 
         # oh god.. otherwise might go into an inf loop
         if not hasattr(logger, _init_done):
-            setattr(logger, _init_done, False) # will setup on the first call
+            setattr(logger, _init_done, False)  # will setup on the first call
             logger.isEnabledFor = isEnabledFor_lazyinit  # type: ignore[method-assign]
         return cast(LazyLogger, logger)
 
@@ -129,6 +139,7 @@ class CollapseDebugHandler(logging.StreamHandler):
     Collapses subsequent debug log lines and redraws on the same line.
     Hopefully this gives both a sense of progress and doesn't clutter the terminal as much?
     '''
+
     last = False
 
     def emit(self, record: logging.LogRecord) -> None:
@@ -137,12 +148,13 @@ class CollapseDebugHandler(logging.StreamHandler):
             cur = record.levelno == logging.DEBUG and '\n' not in msg
             if cur:
                 if self.last:
-                    self.stream.write('\033[K' + '\r') # clear line + return carriage
+                    self.stream.write('\033[K' + '\r')  # clear line + return carriage
             else:
                 if self.last:
-                    self.stream.write('\n') # clean up after the last debug line
+                    self.stream.write('\n')  # clean up after the last debug line
             self.last = cur
             import os
+
             columns, _ = os.get_terminal_size(0)
             # ugh. the columns thing is meh. dunno I guess ultimately need curses for that
             # TODO also would be cool to have a terminal post-processor? kinda like tail but aware of logging keywords (INFO/DEBUG/etc)

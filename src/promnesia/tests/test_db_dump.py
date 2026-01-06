@@ -4,11 +4,11 @@ from concurrent.futures import ProcessPoolExecutor
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import Any
+from typing import Any, cast
+from zoneinfo import ZoneInfo
 
 # NOTE: pytest ... -s --hypothesis-verbosity=debug is useful for seeing what hypothesis is doing
 import pytest
-import pytz
 from hypothesis import given, settings
 from hypothesis.strategies import from_type
 
@@ -22,10 +22,13 @@ from .common import (
     running_on_ci,
 )
 
-HSETTINGS: dict[str, Any] = {
-    'derandomize': True,
-    'deadline': timedelta(seconds=2),  # sometimes slow on ci
-}
+HSETTINGS = cast(
+    dict[str, Any],
+    {
+        'derandomize': True,
+        'deadline': timedelta(seconds=2),  # sometimes slow on ci
+    },
+)
 
 
 def test_no_visits(tmp_path: Path) -> None:
@@ -44,7 +47,7 @@ def test_no_visits(tmp_path: Path) -> None:
 
 def test_one_visit(tmp_path: Path) -> None:
     dt = datetime.fromisoformat('2023-11-14T23:11:01')
-    dt = pytz.timezone('Europe/Warsaw').localize(dt)
+    dt = dt.replace(tzinfo=ZoneInfo('Europe/Warsaw'))
     visit = DbVisit(
         norm_url='google.com',
         orig_url='https://google.com',
@@ -156,7 +159,7 @@ def test_random_visit(visit: DbVisit) -> None:
 
 
 _dt_naive = datetime.fromisoformat('2023-11-14T23:11:01')
-_dt_aware = pytz.timezone('America/New_York').localize(_dt_naive)
+_dt_aware = _dt_naive.replace(tzinfo=ZoneInfo('America/New_York'))
 
 
 def make_testvisit(i: int) -> DbVisit:
